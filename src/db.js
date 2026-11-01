@@ -60,6 +60,30 @@ CREATE TABLE IF NOT EXISTS outbox (
   error TEXT,
   at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS notes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  at TEXT NOT NULL,                               -- when the text was sent
+  author TEXT,
+  phone TEXT,
+  body TEXT NOT NULL,
+  source TEXT NOT NULL,                           -- group | sms | manual
+  cleaning_id INTEGER,                            -- the cleaning it's about
+  booking_uid TEXT,                               -- the stay before that cleaning
+  tags TEXT,                                      -- supplies, condition
+  followup TEXT,                                  -- open | done (Airbnb follow-up on that stay)
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS todos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  note_id INTEGER,
+  cleaning_id INTEGER,
+  status TEXT NOT NULL,                           -- open | done
+  created_by TEXT,
+  created_at TEXT NOT NULL,
+  done_at TEXT,
+  done_by TEXT
+);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 `;
 

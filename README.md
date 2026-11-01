@@ -26,6 +26,18 @@ No dependencies: Node.js 22.13 or newer only. Data lives in one SQLite file (`da
    between stays, and same-day turnovers in red. Airbnb's link has no guest names, so you can type them in.
    Every message sent is listed at the bottom of the dashboard.
 
+## Notes and to-dos
+
+Texts from the group are saved as notes, each with its time and sender, and tied to the cleaning it's about
+(a text on cleaning day or the two days after belongs to that cleaning; otherwise to the next one) and to the
+stay before that cleaning. Notes about missing supplies ("not enough hand towels") become to-dos. Notes about
+damage or mess are flagged under "Raise with Airbnb" on the To-do tab, with a link to that reservation.
+Anything can be re-filed by hand, and texts from another thread can be pasted in on the Notes tab.
+
+- With `GROUP_MODE=conversation`, every message in the group thread is captured (set up by `npm run setup-group`).
+- With `GROUP_MODE=individual`, set the Twilio number's "A message comes in" webhook to `BASE_URL/twilio/sms`.
+  Replies to the app's number are saved and passed on to the rest of the group.
+
 ## Run it locally (test mode, nothing is really sent)
 
     cp .env.example .env      # fill in at least ADMIN_PASSWORD and AIRBNB_ICAL_URL

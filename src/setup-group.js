@@ -25,4 +25,10 @@ for (const p of config.groupMembers) {
   await post(`/Conversations/${convo.sid}/Participants`, { 'MessagingBinding.Address': p.phone });
   console.log('Added', p.name, p.phone);
 }
+// Send every message in the thread to the app so it can file notes and to-dos.
+await post(`/Conversations/${convo.sid}/Webhooks`, {
+  Target: 'webhook', 'Configuration.Url': `${config.baseUrl}/twilio/conversation`,
+  'Configuration.Method': 'POST', 'Configuration.Filters': 'onMessageAdded',
+});
+console.log('Group texts will be saved as notes at', `${config.baseUrl}/twilio/conversation`);
 console.log(`\nAdd these to .env:\nGROUP_MODE=conversation\nTWILIO_CONVERSATION_SID=${convo.sid}`);
