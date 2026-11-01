@@ -5,6 +5,7 @@ import { createApp } from '../src/server.js';
 import { parseIcal } from '../src/ical.js';
 import { localToUtc } from '../src/dates.js';
 import { cleaningFeed } from '../src/feed.js';
+import { cleaningWindows, guestLabel } from '../src/views.js';
 
 const NOW = new Date('2026-11-01T18:00:00Z');
 
@@ -178,7 +179,13 @@ test('HTTP: dashboard needs password, feed needs token, approval page works, dra
     assert.equal(dash.status, 200);
     const html = await dash.text();
     assert.match(html, /Waiting on you/);
-    assert.match(html, /data-date="2026-11-08"><b>8<\/b><span class="chip awaiting_approval"/);
+    assert.match(html, /class="bar stay-bar cont-r" style="grid-column:10\/15"[^>]*>Guest ···1234</, 'Thu 5th 1 PM to Sun 8th 11 AM spans weeks: first week from Thu afternoon');
+    assert.match(html, /class="bar stay-bar cont-l" style="grid-column:1\/2"/, 'continues into Sunday morning');
+    assert.match(html, /class="chip awaiting_approval" draggable="true" data-id="\d+" style="grid-column:1\/span 2"/);
+    assert.match(html, /Open, no next booking yet/);
+
+    await fetch(`${base}/bookings/name`, { method: 'POST', headers: auth, body: new URLSearchParams({ uid: 's1', name: 'Smith family' }), redirect: 'manual' });
+    assert.match(await (await fetch(base + '/?month=2026-11', { headers: auth })).text(), /stay-bar[^"]*" style="grid-column:10\/15"[^>]*>Smith family</);
 
     const c = app.db.prepare('SELECT * FROM cleanings').get();
     const page = await (await fetch(`${base}/a/${c.approval_token}?by=Danielle`)).text();
@@ -224,4 +231,19 @@ test('per-stay billing: cleaned -> Jenn requests amount -> paid', async () => {
   assert.equal(c.status, 'paid');
   assert.equal(c.amount_cents, 14550);
   app.stop();
+});
+
+test('cleaning windows between stays', () => {
+  const w = cleaningWindows([
+    { check_in: '2026-11-10', check_out: '2026-11-12' },
+    { check_in: '2026-11-01', check_out: '2026-11-05' },
+    { check_in: '2026-11-05', check_out: '2026-11-08' },
+  ]);
+  assert.deepEqual(w, [
+    { from: '2026-11-05', to: '2026-11-05', days: 1 },  // same-day turnover
+    { from: '2026-11-08', to: '2026-11-10', days: 3 },  // Sun 11 AM to Tue 1 PM: Sun, Mon, Tue
+    { from: '2026-11-12', to: null, days: null },
+  ]);
+  assert.equal(guestLabel({ description: 'Phone Number (Last 4 Digits): 9876' }), 'Guest ···9876');
+  assert.equal(guestLabel({ guest_name: 'Lee', description: '' }), 'Lee');
 });

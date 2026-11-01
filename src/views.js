@@ -1,27 +1,35 @@
-import { prettyDate, addDays, todayIn } from './dates.js';
+import { prettyDate, prettyTime, addDays, todayIn } from './dates.js';
 
 export const h = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const money = (cents) => `$${((cents || 0) / 100).toFixed(2)}`;
 
 const CSS = `
-:root{--bg:#f7f6f3;--card:#fff;--ink:#1d1d1b;--muted:#6b6a66;--line:#e4e2dc;--accent:#2f6f5e;--accent-ink:#fff;--warn:#a5551b;--chip:#e3f0ec;--chip-ink:#1f4f42;--pending:#fbefd9;--pending-ink:#7a4a10}
-@media (prefers-color-scheme:dark){:root{--bg:#141413;--card:#1e1e1c;--ink:#ecebe6;--muted:#a3a19a;--line:#33322f;--accent:#5fb39a;--accent-ink:#0f1f1a;--warn:#e19a62;--chip:#1f3a32;--chip-ink:#bfe6d9;--pending:#3a2c16;--pending-ink:#f2cf96}}
+:root{--bg:#f7f6f3;--card:#fff;--ink:#1d1d1b;--muted:#6b6a66;--line:#e4e2dc;--accent:#2f6f5e;--accent-ink:#fff;--warn:#a5551b;--chip:#e3f0ec;--chip-ink:#1f4f42;--pending:#fbefd9;--pending-ink:#7a4a10;--stay:#3d5a80;--stay-ink:#fff;--win:#eef6f2;--win-ink:#2f6f5e;--win-line:#8fbfae;--tight:#b3412e}
+@media (prefers-color-scheme:dark){:root{--bg:#141413;--card:#1e1e1c;--ink:#ecebe6;--muted:#a3a19a;--line:#33322f;--accent:#5fb39a;--accent-ink:#0f1f1a;--warn:#e19a62;--chip:#1f3a32;--chip-ink:#bfe6d9;--pending:#3a2c16;--pending-ink:#f2cf96;--stay:#5b7db0;--stay-ink:#fff;--win:#17302a;--win-ink:#9fd6c3;--win-line:#3f7a69;--tight:#d0604b}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,Segoe UI,sans-serif}
 main{max-width:980px;margin:0 auto;padding:16px}h1{font-size:22px;margin:8px 0 4px}h2{font-size:17px;margin:0 0 10px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin:14px 0}
-.muted{color:var(--muted)}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.muted{color:var(--muted)}.warn{color:var(--tight)}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 button,.btn{background:var(--accent);color:var(--accent-ink);border:0;border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer;text-decoration:none;display:inline-block}
 button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}button.danger{background:transparent;color:var(--warn);border:1px solid var(--line)}
 input,textarea,select{font:inherit;padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}textarea{width:100%;min-height:130px}
 table{width:100%;border-collapse:collapse}td,th{padding:8px 6px;border-top:1px solid var(--line);text-align:left;vertical-align:top}th{font-weight:600;color:var(--muted);font-size:13px}
 .stages{display:flex;gap:4px;flex-wrap:wrap}.stage{font-size:12px;padding:2px 7px;border-radius:99px;border:1px solid var(--line);color:var(--muted)}.stage.done{background:var(--chip);color:var(--chip-ink);border-color:transparent}
 .pill{font-size:12px;padding:2px 8px;border-radius:99px;background:var(--pending);color:var(--pending-ink)}
-.cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}.cal .dow{font-size:12px;color:var(--muted);text-align:center}
-.day{min-width:0;overflow:hidden;min-height:74px;border:1px solid var(--line);border-radius:8px;padding:4px;font-size:12px}.day.out{opacity:.4}.day.today{border-color:var(--accent)}.day.over{outline:2px dashed var(--accent)}
-.stay{font-size:11px;color:var(--muted)}.chip{display:block;margin-top:3px;padding:3px 5px;border-radius:6px;background:var(--chip);color:var(--chip-ink);cursor:grab;font-size:12px}
-.chip.awaiting_approval{background:var(--pending);color:var(--pending-ink)}
+.dows{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));font-size:12px;color:var(--muted);text-align:center;margin-bottom:4px}
+.cal{display:flex;flex-direction:column;gap:4px}
+.week{display:grid;grid-template-columns:repeat(14,minmax(0,1fr));grid-template-rows:22px 24px 24px 26px;column-gap:0;row-gap:3px;position:relative}
+.day{grid-row:1/-1;min-width:0;border:1px solid var(--line);border-radius:8px;padding:2px 5px;font-size:12px;margin:0 2px}.day.out{opacity:.45}.day.today{border-color:var(--accent);border-width:2px}.day.over{outline:2px dashed var(--accent)}
+.bar{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:12px;line-height:22px;padding:0 6px;border-radius:11px;z-index:1}
+.stay-bar{grid-row:2;background:var(--stay);color:var(--stay-ink);font-weight:600}.stay-bar.cont-l{border-top-left-radius:0;border-bottom-left-radius:0}.stay-bar.cont-r{border-top-right-radius:0;border-bottom-right-radius:0}
+.win-bar{grid-row:3;background:var(--win);color:var(--win-ink);border:1px dashed var(--win-line);line-height:20px;font-size:11px}
+.win-bar.short{background:var(--pending);color:var(--pending-ink);border-color:var(--pending-ink)}.win-bar.tight{background:var(--tight);color:#fff;border:0;margin:0 4px;text-align:center;font-weight:600}
+.chip{grid-row:4;z-index:2;margin:0 4px;padding:2px 5px;border-radius:6px;background:var(--chip);color:var(--chip-ink);cursor:grab;font-size:12px;font-weight:600;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;border:1px solid var(--accent)}
+.chip.awaiting_approval{background:var(--pending);color:var(--pending-ink);border-color:var(--pending-ink)}
+body.dragging .bar,body.dragging .chip{pointer-events:none}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted);margin:0 0 10px}.legend span{display:flex;align-items:center;gap:6px}.legend i{display:inline-block;width:22px;height:12px;padding:0;margin:0;line-height:0}
+@media (max-width:640px){.bar{font-size:10px;padding:0 3px}.chip{font-size:10px;margin:0 1px;padding:2px 2px}.day{margin:0 1px;padding:1px 3px}.hide-sm{display:none}}
 .scroll{overflow-x:auto}code{word-break:break-all}
-@media (max-width:640px){.day{min-height:56px}.hide-sm{display:none}}
 `;
 
 export function layout(title, body) {
@@ -57,35 +65,107 @@ ${guestsStaying ? `<p class="pill" style="display:inline-block">Heads up: guests
 <button name="send" value="1">Send to group</button><button class="ghost" name="send" value="0">Don't send</button></div></form></div>`);
 }
 
-function calendar(month, cleanings, bookings, tz) {
+// Airbnb's export has no guest names, only the last 4 digits of the guest's phone.
+// Mark or Danielle can type a name on the dashboard; until then we show the digits.
+export function guestLabel(b) {
+  if (b.guest_name) return b.guest_name;
+  const last4 = (b.description || '').match(/Last 4 Digits\)?:\s*(\d{4})/i);
+  return last4 ? `Guest ···${last4[1]}` : 'Guest';
+}
+
+const daysBetween = (a, b) => Math.round((new Date(b + 'T12:00:00Z') - new Date(a + 'T12:00:00Z')) / 864e5);
+
+// Open windows for cleaning: from one checkout (11 AM) to the next check-in (1 PM).
+export function cleaningWindows(bookings) {
+  const sorted = [...bookings].sort((a, b) => a.check_in.localeCompare(b.check_in));
+  return sorted.map((b, i) => {
+    const next = sorted.slice(i + 1).find(n => n.check_in >= b.check_out) || null;
+    return { from: b.check_out, to: next ? next.check_in : null, days: next ? daysBetween(b.check_out, next.check_in) + 1 : null };
+  });
+}
+
+function calendar(month, cleanings, bookings, tz, config) {
   const [y, m] = month.split('-').map(Number);
   const first = `${month}-01`;
-  const startDow = new Date(first + 'T12:00:00Z').getUTCDay();
-  const gridStart = addDays(first, -startDow);
+  const gridStart = addDays(first, -new Date(first + 'T12:00:00Z').getUTCDay());
   const today = todayIn(tz);
   const prev = new Date(Date.UTC(y, m - 2, 1)).toISOString().slice(0, 7);
   const next = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 7);
   const label = new Date(first + 'T12:00:00Z').toLocaleDateString('en-US', { timeZone: 'UTC', month: 'long', year: 'numeric' });
-  let cells = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => `<div class="dow">${d}</div>`).join('');
-  for (let i = 0; i < 42; i++) {
-    const d = addDays(gridStart, i);
-    const stays = bookings.filter(b => b.check_in <= d && d < b.check_out).length ? '<div class="stay">guests</div>' : '';
-    const chips = cleanings.filter(c => c.date === d && !['cancelled', 'declined'].includes(c.status))
-      .map(c => `<span class="chip ${c.status}" draggable="true" data-id="${c.id}" title="Drag to move">${c.status === 'awaiting_approval' ? 'Needs OK' : 'Cleaning'}</span>`).join('');
-    cells += `<div class="day ${d.slice(0, 7) !== month ? 'out' : ''} ${d === today ? 'today' : ''}" data-date="${d}"><b>${Number(d.slice(8))}</b>${stays}${chips}</div>`;
+  const windows = cleaningWindows(bookings);
+  const live = cleanings.filter(c => !['cancelled', 'declined'].includes(c.status));
+  const weeks = [];
+
+  // Each week is a 14-column grid (two half-days per day), so a stay can start at the
+  // check-in afternoon and end at the checkout morning, and the open window sits between.
+  for (let w = 0; w < 6; w++) {
+    const ws = addDays(gridStart, w * 7);
+    const we = addDays(ws, 6);
+    if (w === 5 && ws.slice(0, 7) !== month) break;
+    const idx = (d) => daysBetween(ws, d);
+    // half-column grid line for the middle of day d (clipped to this week)
+    const mid = (d, edge) => { const i = idx(d); return i < 0 ? 1 : i > 6 ? 15 : 2 * i + 2 + (edge || 0); };
+    let html = '';
+    for (let i = 0; i < 7; i++) {
+      const d = addDays(ws, i);
+      html += `<div class="day ${d.slice(0, 7) !== month ? 'out' : ''} ${d === today ? 'today' : ''}" data-date="${d}" style="grid-column:${2 * i + 1}/span 2"><b>${Number(d.slice(8))}</b></div>`;
+    }
+    for (const b of bookings) {
+      if (b.check_out < ws || b.check_in > we) continue;
+      const s = mid(b.check_in), e = mid(b.check_out);
+      if (e <= s) continue;
+      const cut = `${b.check_in < ws ? ' cont-l' : ''}${b.check_out > we ? ' cont-r' : ''}`;
+      const nights = daysBetween(b.check_in, b.check_out);
+      html += `<div class="bar stay-bar${cut}" style="grid-column:${s}/${e}" title="${h(guestLabel(b))}: ${h(prettyDate(b.check_in))} to ${h(prettyDate(b.check_out))}, ${nights} night${nights === 1 ? '' : 's'}">${h(guestLabel(b))}</div>`;
+    }
+    for (const win of windows) {
+      const end = win.to || addDays(we, 1);
+      if (end < ws || win.from > we) continue;
+      let s = mid(win.from), e = mid(end);
+      const sameDay = win.to && win.to === win.from;
+      if (sameDay) { s = mid(win.from) - 1; e = s + 2; }
+      if (e <= s) continue;
+      const text = sameDay ? `Same-day turnover: ${prettyTime(config.checkoutTime)} to ${prettyTime(config.checkinTime)}` : win.to ? `${win.days} days to clean` : 'Open, no next booking yet';
+      const showText = win.from >= ws || ws === gridStart; // label once, where the window starts
+      html += `<div class="bar win-bar${sameDay ? ' tight' : win.to && win.days <= 2 ? ' short' : ''}" style="grid-column:${s}/${e}" title="${h(text)}">${sameDay ? 'Same day' : showText ? h(text) : ''}</div>`;
+    }
+    for (const c of live) {
+      const i = idx(c.date);
+      if (i < 0 || i > 6) continue;
+      html += `<span class="chip ${c.status}" draggable="true" data-id="${c.id}" style="grid-column:${2 * i + 1}/span 2" title="Drag to move">${c.status === 'awaiting_approval' ? 'Needs OK' : 'Cleaning'}</span>`;
+    }
+    weeks.push(`<div class="week">${html}</div>`);
   }
+
   return `<div class="row" style="justify-content:space-between"><h2>${label}</h2><div class="row">
 <a class="btn" href="/?month=${prev}">&lsaquo;</a><a class="btn" href="/?month=${next}">&rsaquo;</a></div></div>
-<p class="muted">Drag a cleaning to another day to move it. You'll be asked before anything is texted to the group.</p>
-<div class="cal" id="cal">${cells}</div>
+<div class="legend"><span><i class="bar stay-bar"></i>Guests staying</span><span><i class="bar win-bar"></i>Open days to clean</span><span><i class="bar win-bar tight"></i>Same-day turnover</span><span><i class="chip approved"></i>Cleaning</span><span><i class="chip awaiting_approval"></i>Needs approval</span></div>
+<div class="dows">${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => `<div>${d}</div>`).join('')}</div>
+<div class="cal" id="cal">${weeks.join('')}</div>
+<p class="muted">Stays run from ${prettyTime(config.checkinTime)} check-in to ${prettyTime(config.checkoutTime)} checkout. Drag a cleaning to another day to move it. You'll be asked before anything is texted to the group.</p>
 <script>
-let dragId=null;document.querySelectorAll('.chip').forEach(c=>c.addEventListener('dragstart',e=>{dragId=c.dataset.id;e.dataTransfer.setData('text/plain',dragId)}));
+let dragId=null;document.querySelectorAll('.chip[data-id]').forEach(c=>{c.addEventListener('dragstart',e=>{dragId=c.dataset.id;e.dataTransfer.setData('text/plain',dragId);document.body.classList.add('dragging')});c.addEventListener('dragend',()=>document.body.classList.remove('dragging'))});
 document.querySelectorAll('.day').forEach(d=>{d.addEventListener('dragover',e=>{e.preventDefault();d.classList.add('over')});
 d.addEventListener('dragleave',()=>d.classList.remove('over'));
 d.addEventListener('drop',async e=>{e.preventDefault();d.classList.remove('over');const id=e.dataTransfer.getData('text/plain')||dragId;if(!id)return;
 const r=await fetch('/cleanings/'+id+'/move',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','Accept':'application/json'},body:'date='+d.dataset.date});
 const j=await r.json();location.href=j.redirect||'/?month=${month}'})});
 </script>`;
+}
+
+function staysCard(bookings, today, config) {
+  const wins = cleaningWindows(bookings);
+  const sorted = [...bookings].sort((a, b) => a.check_in.localeCompare(b.check_in));
+  const rows = sorted.map((b, i) => [b, wins[i]]).filter(([b]) => b.check_out >= today).map(([b, w]) => {
+    const nights = daysBetween(b.check_in, b.check_out);
+    const gap = !w.to ? 'No next booking yet' : w.to === w.from ? '<b class="warn">Same day</b>' : `${w.days} days (${h(prettyDate(w.from))} to ${h(prettyDate(w.to))})`;
+    return `<tr><td><form method="post" action="/bookings/name" class="row"><input type="hidden" name="uid" value="${h(b.uid)}">
+<input name="name" value="${h(b.guest_name || '')}" placeholder="${h(guestLabel(b))}" style="width:150px"><button class="ghost">Save</button></form></td>
+<td>${h(prettyDate(b.check_in))} to ${h(prettyDate(b.check_out))}<div class="muted">${nights} night${nights === 1 ? '' : 's'}</div></td><td>${gap}</td></tr>`;
+  }).join('');
+  return `<div class="card"><h2>Stays and cleaning windows</h2>
+<p class="muted">Airbnb's calendar link doesn't include guest names, only the last 4 digits of their phone. Type a name here and it shows on the calendar.</p>
+${rows ? `<div class="scroll"><table><tr><th>Guest</th><th>Stay</th><th>Time to clean after</th></tr>${rows}</table></div>` : '<p class="muted">No upcoming stays.</p>'}</div>`;
 }
 
 export function dashboard({ config, service, db, month, who, flash }) {
@@ -126,7 +206,8 @@ export function dashboard({ config, service, db, month, who, flash }) {
 <form method="post" action="/sync"><button>Check Airbnb now</button></form></div></div>
 ${flash ? `<div class="card">${h(flash)}</div>` : ''}
 ${decisions ? `<div class="card"><h2>Waiting on you</h2><div class="scroll"><table>${decisions}</table></div></div>` : ''}
-<div class="card">${calendar(month, cleanings, bookings, config.timezone)}</div>
+<div class="card">${calendar(month, cleanings, bookings, config.timezone, config)}</div>
+${staysCard(bookings, today, config)}
 <div class="card"><h2>Add a cleaning day</h2><form method="post" action="/cleanings" class="row">
 <input type="date" name="date" required min="${today}"><input name="note" placeholder="Note for the cleaner (optional)" style="flex:1;min-width:180px"><button>Add</button></form>
 <p class="muted">Days you add count as approved. You'll see the group text before it goes out.</p></div>

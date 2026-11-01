@@ -140,6 +140,10 @@ export function createApp(config, deps = {}) {
       if (r.message) return after(req, res, `/g/${r.message.token}?by=${encodeURIComponent(who)}`);
       return after(req, res, `/?month=${service.get(id).date.slice(0, 7)}&flash=${encodeURIComponent(m[2] === 'move' ? `Moved to ${prettyDate(service.get(id).date)}. The group hadn't been told about it yet, so there was nothing to send.` : 'Done.')}`);
     }
+    if (p === '/bookings/name') {
+      db.prepare('UPDATE bookings SET guest_name = ? WHERE uid = ?').run((body.get('name') || '').trim().slice(0, 60) || null, body.get('uid') || '');
+      return redirect(res, '/');
+    }
     if (p === '/payments/request') {
       const ok = service.recordPaymentRequest(Number(body.get('id')), body.get('amount'), who);
       return redirect(res, ok ? '/#payments' : '/?flash=Enter+an+amount+above+zero#payments');

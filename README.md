@@ -22,6 +22,8 @@ No dependencies: Node.js 22.13 or newer only. Data lives in one SQLite file (`da
    dashboard; it then shows as owed until you mark it paid (Venmo, Zelle, cash...). If you set a fixed
    `CLEANING_FEE` instead, it's owed automatically and you get a text with the running total.
 7. Every cleaning shows its stages: Booked, Approval requested, Approved, Cleaner texted, Cleaned, Payment requested, Paid.
+   The calendar shows each stay as a bar (11 AM checkout to 1 PM check-in), the open days to clean
+   between stays, and same-day turnovers in red. Airbnb's link has no guest names, so you can type them in.
    Every message sent is listed at the bottom of the dashboard.
 
 ## Run it locally (test mode, nothing is really sent)
