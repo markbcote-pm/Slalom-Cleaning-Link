@@ -1,0 +1,14 @@
+{
+  "name": "slalom-cleaning-link",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Turns Airbnb bookings into approved cleaning days, group texts, a shared calendar feed and cleaner payment tracking.",
+  "type": "module",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "start": "node --no-warnings=ExperimentalWarning src/server.js",
+    "dev": "DRY_RUN=1 node --no-warnings=ExperimentalWarning src/server.js",
+    "setup-group": "node --no-warnings=ExperimentalWarning src/setup-group.js",
+    "test": "node --no-warnings=ExperimentalWarning --test test/*.test.js"
+  }
+}

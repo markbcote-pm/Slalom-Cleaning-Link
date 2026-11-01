@@ -1,0 +1,48 @@
+# Render blueprint: New > Blueprint, pick this repo. Fill in the secret values when Render asks.
+services:
+  - type: web
+    name: cleaning-link
+    runtime: node
+    plan: starter            # needed for the persistent disk that holds the database
+    buildCommand: "true"
+    startCommand: npm start
+    healthCheckPath: /health
+    disk:
+      name: data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: "22.13.0"
+      - key: DATA_DIR
+        value: /var/data
+      - key: TIMEZONE
+        value: America/Los_Angeles
+      - key: CHECKOUT_TIME
+        value: "11:00"
+      - key: CHECKIN_TIME
+        value: "13:00"
+      - key: CLEANING_FEE
+        value: "0"
+      - key: GROUP_MODE
+        value: individual
+      - key: DRY_RUN
+        value: "1"           # change to 0 once you've checked the dashboard
+      - key: BASE_URL         # your Render address, e.g. https://cleaning-link.onrender.com
+        sync: false
+      - key: AIRBNB_ICAL_URL
+        sync: false
+      - key: APPROVERS
+        sync: false
+      - key: CLEANER
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: FEED_TOKEN
+        generateValue: true
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM
+        sync: false
