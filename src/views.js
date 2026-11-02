@@ -4,8 +4,8 @@ export const h = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;'
 const money = (cents) => `$${((cents || 0) / 100).toFixed(2)}`;
 
 const CSS = `
-:root{--bg:#f7f6f3;--card:#fff;--ink:#1d1d1b;--muted:#6b6a66;--line:#e4e2dc;--accent:#2f6f5e;--accent-ink:#fff;--warn:#a5551b;--chip:#e3f0ec;--chip-ink:#1f4f42;--pending:#fbefd9;--pending-ink:#7a4a10;--stay:#3d5a80;--stay-ink:#fff;--win:#eef6f2;--win-ink:#2f6f5e;--win-line:#8fbfae;--tight:#b3412e;--tight-ring:#ffb199;--s-pending:#a16207;--s-missing:#d9480f;--s-past:#8a939e;--w-missing:#fff0e6;--w-missing-ink:#a8360a;--out:#efeee9}
-@media (prefers-color-scheme:dark){:root{--bg:#141413;--card:#1e1e1c;--ink:#ecebe6;--muted:#a3a19a;--line:#33322f;--accent:#5fb39a;--accent-ink:#0f1f1a;--warn:#e19a62;--chip:#1f3a32;--chip-ink:#bfe6d9;--pending:#3a2c16;--pending-ink:#f2cf96;--stay:#5b7db0;--stay-ink:#fff;--win:#17302a;--win-ink:#9fd6c3;--win-line:#3f7a69;--tight:#d0604b;--tight-ring:#ffb199;--s-pending:#b7791f;--s-missing:#e8590c;--s-past:#4b5563;--w-missing:#3b1d0e;--w-missing-ink:#ffb48a;--out:#181817}}
+:root{--bg:#f7f6f3;--card:#fff;--ink:#1d1d1b;--muted:#6b6a66;--line:#e4e2dc;--accent:#2f6f5e;--accent-ink:#fff;--warn:#a5551b;--chip:#e3f0ec;--chip-ink:#1f4f42;--pending:#fbefd9;--pending-ink:#7a4a10;--stay:#3d5a80;--stay-ink:#fff;--win:#eef6f2;--win-ink:#2f6f5e;--win-line:#8fbfae;--tight:#b3412e;--tight-ring:#ffb199;--s-pending:#a16207;--s-missing:#d9480f;--s-past:#8a939e;--w-missing:#fff0e6;--w-missing-ink:#a8360a;--out:#efeee9;--c-prop:#fdf3e1;--c-prop-ink:#7a4a10;--c-prop-line:#c8912f;--c-asked:#ece7fc;--c-asked-ink:#4a3593;--c-asked-line:#8d78d9;--c-ok:#2f6f5e;--c-ok-ink:#fff;--c-past:#efeee9;--c-past-ink:#8a8780;--c-past-line:#d9d7d0}
+@media (prefers-color-scheme:dark){:root{--bg:#141413;--card:#1e1e1c;--ink:#ecebe6;--muted:#a3a19a;--line:#33322f;--accent:#5fb39a;--accent-ink:#0f1f1a;--warn:#e19a62;--chip:#1f3a32;--chip-ink:#bfe6d9;--pending:#3a2c16;--pending-ink:#f2cf96;--stay:#5b7db0;--stay-ink:#fff;--win:#17302a;--win-ink:#9fd6c3;--win-line:#3f7a69;--tight:#d0604b;--tight-ring:#ffb199;--s-pending:#b7791f;--s-missing:#e8590c;--s-past:#4b5563;--w-missing:#3b1d0e;--w-missing-ink:#ffb48a;--out:#181817;--c-prop:#3a2c16;--c-prop-ink:#f2cf96;--c-prop-line:#b7791f;--c-asked:#2b2448;--c-asked-ink:#d4c9ff;--c-asked-line:#7563cc;--c-ok:#3f8f78;--c-ok-ink:#fff;--c-past:#262624;--c-past-ink:#8f8d86;--c-past-line:#3a3a37}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,Segoe UI,sans-serif}
 main{max-width:980px;margin:0 auto;padding:16px}h1{font-size:22px;margin:8px 0 4px}h2{font-size:17px;margin:0 0 10px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin:14px 0}
@@ -15,7 +15,7 @@ button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line
 input,textarea,select{font:inherit;padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}textarea{width:100%;min-height:130px}
 table{width:100%;border-collapse:collapse}td,th{padding:8px 6px;border-top:1px solid var(--line);text-align:left;vertical-align:top}th{font-weight:600;color:var(--muted);font-size:13px}
 .stages{display:flex;gap:4px;flex-wrap:wrap}.stage{font-size:12px;padding:2px 7px;border-radius:99px;border:1px solid var(--line);color:var(--muted)}.stage.done{background:var(--chip);color:var(--chip-ink);border-color:transparent}
-.pill{font-size:12px;padding:2px 8px;border-radius:99px;background:var(--pending);color:var(--pending-ink)}
+.pill{font-size:12px;padding:2px 8px;border-radius:99px;background:var(--pending);color:var(--pending-ink)}.pill.asked{background:var(--c-asked);color:var(--c-asked-ink)}
 .dows{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));font-size:12px;color:var(--muted);text-align:center;margin-bottom:4px}
 .cal{display:flex;flex-direction:column;gap:4px}
 .week{display:grid;grid-template-columns:repeat(14,minmax(0,1fr));grid-template-rows:22px 24px 24px 26px;column-gap:0;row-gap:3px;position:relative}
@@ -28,7 +28,13 @@ table{width:100%;border-collapse:collapse}td,th{padding:8px 6px;border-top:1px s
 .win-bar.missing{background:var(--w-missing);color:var(--w-missing-ink);border:1px solid var(--s-missing);font-weight:600}
 .win-bar.tight{color:#fff;border:0;margin:0 4px;text-align:center;font-weight:600;background:var(--accent)}.win-bar.tight.pending{background:var(--s-pending)}.win-bar.tight.missing{background:var(--s-missing)}
 .chip{grid-row:4;z-index:2;margin:0 4px;padding:2px 5px;border-radius:6px;background:var(--chip);color:var(--chip-ink);cursor:grab;font-size:12px;font-weight:600;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;border:1px solid var(--accent)}
-.chip.awaiting_approval{background:var(--pending);color:var(--pending-ink);border-color:var(--pending-ink)}
+.chip.cs-proposed{background:var(--c-prop);color:var(--c-prop-ink);border:1.5px dashed var(--c-prop-line)}
+.chip.cs-asked{background:var(--c-asked);color:var(--c-asked-ink);border-color:var(--c-asked-line)}
+.chip.cs-confirmed{background:var(--c-ok);color:var(--c-ok-ink);border-color:var(--c-ok)}
+.chip.cs-past{background:var(--c-past);color:var(--c-past-ink);border-color:var(--c-past-line);font-weight:500;cursor:pointer}
+.legend i.chip{width:22px;height:12px;border-radius:4px}
+.l-short{display:none}@media (max-width:640px){.chip .l-long{display:none}.chip .l-short{display:inline}.chip{text-align:center}}
+.state-banner{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px}.chip.static{cursor:default;display:inline-block;padding:2px 8px}
 body.dragging .bar,body.dragging .chip{pointer-events:none}
 .monthnav{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 10px}.monthtitle{text-align:center;flex:1;min-width:0}.monthtitle h2{margin:0;font-size:22px}.monthtitle span{font-size:12px}.btn.ghost{background:none;color:var(--accent);border:1px solid var(--line);white-space:nowrap}.btn.ghost:hover{background:var(--win)}
 .legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted);margin:0 0 6px;align-items:center}.legend b{color:var(--ink)}.legend span{display:flex;align-items:center;gap:6px}.legend i{display:inline-block;width:22px;height:12px;padding:0;margin:0;line-height:0}
@@ -111,6 +117,25 @@ export function cleaningWindows(bookings) {
 //   missing - nothing scheduled in that gap
 //   past    - the stay is over (shown greyed out)
 // Stays that have already started, or have no stay before them, count as ready.
+// Where a cleaning stands with the cleaner, for the calendar colors:
+//   proposed  - not sent to the cleaner yet (waiting for your OK, or approved but not texted)
+//   asked     - texted to the group, waiting for the cleaner to say yes
+//   confirmed - the cleaner said yes, or you arranged it with her directly
+//   past      - the day has gone by (or it's done/paid)
+export function cleaningState(c, today) {
+  if (['completed', 'paid'].includes(c.status) || c.date < today) return 'past';
+  if (c.status === 'awaiting_approval') return 'proposed';
+  if (c.group_known_date !== c.date) return 'proposed';
+  return c.cleaner_confirmed_at ? 'confirmed' : 'asked';
+}
+
+export const CHIP_LABEL = { proposed: 'Needs OK', unsent: 'Not sent', asked: 'Asked', confirmed: '✓ Booked', past: 'Done' };
+const CHIP_SHORT = { proposed: 'OK?', unsent: 'Draft', asked: 'Asked', confirmed: '✓', past: 'Done' };
+const chipKey = (c, st) => st === 'proposed' && c.status !== 'awaiting_approval' ? 'unsent' : st;
+const chipLabel = (c, st) => CHIP_LABEL[chipKey(c, st)];
+// Full label on wide screens, a short one on phones where a day is ~50px wide.
+const chipText = (c, st) => `<span class="l-long">${CHIP_LABEL[chipKey(c, st)]}</span><span class="l-short">${CHIP_SHORT[chipKey(c, st)]}</span>`;
+
 export function stayReadiness(bookings, cleanings, today) {
   const live = cleanings.filter(c => !['cancelled', 'declined'].includes(c.status));
   const out = {};
@@ -120,14 +145,14 @@ export function stayReadiness(bookings, cleanings, today) {
     const prev = bookings.filter(p => p.uid !== b.uid && p.check_out <= b.check_in).sort((x, y) => y.check_out.localeCompare(x.check_out))[0];
     if (!prev) { out[b.uid] = 'ready'; continue; }
     const inGap = live.filter(c => c.date >= prev.check_out && c.date <= b.check_in);
-    out[b.uid] = inGap.some(c => c.status !== 'awaiting_approval') ? 'ready' : inGap.length ? 'pending' : 'missing';
+    out[b.uid] = inGap.some(c => ['confirmed', 'past'].includes(cleaningState(c, today))) ? 'ready' : inGap.length ? 'pending' : 'missing';
     // Your own stays don't raise the alarm if the house wasn't cleaned before you arrive.
     if (b.source === 'personal' && out[b.uid] === 'missing') out[b.uid] = 'ready';
   }
   return out;
 }
 
-const READINESS_NOTE = { ready: 'Cleaning scheduled before check-in', pending: 'Cleaning proposed, waiting for approval', missing: 'No cleaning scheduled before check-in', past: 'Past stay' };
+const READINESS_NOTE = { ready: 'Cleaning confirmed before check-in', pending: 'Cleaning planned but not confirmed with the cleaner yet', missing: 'No cleaning scheduled before check-in', past: 'Past stay' };
 
 function calendar(month, cleanings, bookings, tz, config, extras = { counts: {}, flagged: new Set() }) {
   const [y, m] = month.split('-').map(Number);
@@ -177,7 +202,7 @@ function calendar(month, cleanings, bookings, tz, config, extras = { counts: {},
       if (sameDay) { s = mid(win.from) - 1; e = s + 2; }
       if (e <= s) continue;
       const st = win.nextUid ? (ready[win.nextUid] || 'ready') : 'open';
-      const status = { ready: 'cleaning set', pending: 'needs OK', missing: 'no cleaning yet', past: '' }[st] || '';
+      const status = { ready: 'cleaning booked', pending: 'not confirmed yet', missing: 'no cleaning yet', past: '' }[st] || '';
       const text = sameDay ? `Same-day turnover: ${prettyTime(config.checkoutTime)} to ${prettyTime(config.checkinTime)}${status ? `, ${status}` : ''}`
         : win.to ? `${win.days} days to clean${status ? ` · ${status}` : ''}` : 'Open, no next booking yet';
       const showText = win.from >= ws || ws === gridStart; // label once, where the window starts
@@ -186,7 +211,9 @@ function calendar(month, cleanings, bookings, tz, config, extras = { counts: {},
     for (const c of live) {
       const i = idx(c.date);
       if (i < 0 || i > 6) continue;
-      html += `<span class="chip ${c.status}" draggable="true" data-id="${c.id}" style="grid-column:${2 * i + 1}/span 2" title="Click to open, drag to move">${c.status === 'awaiting_approval' ? 'Needs OK' : 'Cleaning'}${extras.counts[c.id] ? ` <small>✎${extras.counts[c.id]}</small>` : ''}</span>`;
+      const st = cleaningState(c, today);
+      const tip = { proposed: c.status === 'awaiting_approval' ? 'Proposed, waiting for your OK' : 'Approved, not sent to the cleaner yet', asked: 'Texted to the group, waiting for the cleaner to confirm', confirmed: 'Confirmed with the cleaner', past: 'Past cleaning' }[st];
+      html += `<span class="chip cs-${st}" draggable="${st === 'past' ? 'false' : 'true'}" data-id="${c.id}" style="grid-column:${2 * i + 1}/span 2" title="${h(tip)}. Click to open${st === 'past' ? '' : ', drag to move'}.">${chipText(c, st)}${extras.counts[c.id] ? ` <small>✎${extras.counts[c.id]}</small>` : ''}</span>`;
     }
     weeks.push(`<div class="week">${html}</div>`);
   }
@@ -198,8 +225,8 @@ function calendar(month, cleanings, bookings, tz, config, extras = { counts: {},
 <a class="btn ghost" href="/?month=${prev}" aria-label="Previous month">&lsaquo; ${short(prev)}</a>
 <div class="monthtitle"><h2>${label}</h2><span class="muted">${rel}${month !== thisMonth ? ` · <a href="/?month=${thisMonth}">Back to today</a>` : ''}</span></div>
 <a class="btn ghost" href="/?month=${next}" aria-label="Next month">${short(next)} &rsaquo;</a></div>
-<div class="legend"><b>Stays:</b><span><i class="bar stay-bar ready"></i>Cleaning set before check-in</span><span><i class="bar stay-bar pending"></i>Cleaning waiting for approval</span><span><i class="bar stay-bar missing"></i>No cleaning before check-in</span><span><i class="bar stay-bar past"></i>Past</span><span><i class="bar stay-bar ready personal"></i>⌂ Personal stay</span></div>
-<div class="legend"><b>Cleanings:</b><span><i class="chip approved"></i>Confirmed (✎ = notes)</span><span><i class="chip awaiting_approval"></i>Needs approval</span><span>⚠ Something to raise with Airbnb</span></div>
+<div class="legend"><b>Stays:</b><span><i class="bar stay-bar ready"></i>Cleaning confirmed before check-in</span><span><i class="bar stay-bar pending"></i>Cleaning not confirmed yet</span><span><i class="bar stay-bar missing"></i>No cleaning before check-in</span><span><i class="bar stay-bar past"></i>Past</span><span><i class="bar stay-bar ready personal"></i>⌂ Personal stay</span></div>
+<div class="legend"><b>Cleanings:</b><span><i class="chip cs-proposed"></i>Not sent to ${h(config.cleaner?.name || 'cleaner')} yet</span><span><i class="chip cs-asked"></i>Texted, waiting on ${h(config.cleaner?.name || 'cleaner')}</span><span><i class="chip cs-confirmed"></i>Confirmed</span><span><i class="chip cs-past"></i>Past</span><span>✎ notes · ⚠ raise with Airbnb</span></div>
 <div class="dows">${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => `<div>${d}</div>`).join('')}</div>
 <div class="cal" id="cal">${weeks.join('')}</div>
 <p class="muted cal-help">Stays run from ${prettyTime(config.checkinTime)} check-in to ${prettyTime(config.checkoutTime)} checkout. Tap a day to add a cleaning. Tap a cleaning to open it, or drag it to another day to move it. You'll be asked before anything is texted to the group.</p>
@@ -260,7 +287,8 @@ export function header({ config, db, who, active }) {
   const openTodos = db.prepare("SELECT COUNT(*) n FROM todos WHERE status='open'").get().n
     + db.prepare("SELECT COUNT(*) n FROM notes WHERE followup='open'").get().n;
   const waiting = db.prepare("SELECT COUNT(*) n FROM group_messages WHERE status='pending'").get().n
-    + db.prepare("SELECT COUNT(*) n FROM cleanings WHERE status='awaiting_approval'").get().n;
+    + db.prepare("SELECT COUNT(*) n FROM cleanings WHERE status='awaiting_approval'").get().n
+    + db.prepare("SELECT COUNT(*) n FROM cleanings WHERE status='approved' AND group_known_date = date AND cleaner_confirmed_at IS NULL AND date >= ?").get(todayIn(config.timezone)).n;
   const badge = (n) => n ? ` <span class="count">${n}</span>` : '';
   const tab = (key, href, label) => `<a class="tab ${active === key ? 'on' : ''}" href="${href}">${label}</a>`;
   return `<div class="topbar"><div><h1>Cleaning Link</h1>${config.dryRun ? '<span class="test-badge">Test mode</span>' : ''}</div>
@@ -329,6 +357,21 @@ ${follow.length ? `<ul class="todos">${follow.map(followRow).join('')}</ul>` : '
 ${done.length ? `<div class="card"><h2>Done recently</h2><ul class="todos">${done.map(todoRow).join('')}</ul></div>` : ''}`);
 }
 
+function stateBanner(c, config) {
+  if (['cancelled', 'declined'].includes(c.status)) return '';
+  const st = cleaningState(c, todayIn(config.timezone));
+  const cleaner = h(config.cleaner?.name || 'the cleaner');
+  const text = {
+    proposed: c.status === 'awaiting_approval' ? 'Proposed, waiting for your OK.' : `Approved, but not sent to ${cleaner} yet.`,
+    asked: `Texted to the group. Waiting for ${cleaner} to confirm.`,
+    confirmed: `Confirmed with ${cleaner}.`,
+    past: 'This cleaning is in the past.',
+  }[st];
+  const btn = st === 'asked' ? `<form method="post" action="/cleanings/${c.id}/confirm"><button>${cleaner} confirmed</button></form>`
+    : st === 'confirmed' && c.group_known_date === c.date ? `<form method="post" action="/cleanings/${c.id}/unconfirm"><button class="ghost small">Undo confirmed</button></form>` : '';
+  return `<div class="state-banner"><span class="chip cs-${st} static">${chipLabel(c, st)}</span><span>${text}</span>${btn}</div>`;
+}
+
 export function cleaningPage({ config, db, who, service, id }) {
   const c = service.get(id);
   if (!c) return null;
@@ -344,6 +387,7 @@ export function cleaningPage({ config, db, who, service, id }) {
   return layout(`Cleaning ${prettyDate(c.date)}`, `${header({ config, db, who, active: 'calendar' })}
 <div class="card"><p><a href="/?month=${c.date.slice(0, 7)}">&lsaquo; Calendar</a></p><h2>Cleaning ${h(prettyDate(c.date))}</h2>
 <div class="stages">${service.stageOf(c).map(s => `<span class="stage ${s.done ? 'done' : ''}">${h(s.name)}</span>`).join('')}</div>
+${stateBanner(c, config)}
 <table style="margin-top:10px"><tr><th>After the stay of</th><td>${stayText(stay)}</td></tr><tr><th>Before the stay of</th><td>${stayText(nextStay)}</td></tr>
 ${c.note ? `<tr><th>Note</th><td>${h(c.note)}</td></tr>` : ''}</table></div>
 <div class="card"><h2>Notes</h2>${notes.length ? `<ul class="notes">${notes.map(n => noteItem(n, { config, cleanings, showCleaning: false })).join('')}</ul>` : '<p class="muted">No notes for this cleaning yet.</p>'}
@@ -390,12 +434,15 @@ function pageData({ config, service, db, month }) {
   };
 }
 
-function decisionsList({ db, service, who }) {
+function decisionsList({ db, service, who, config }) {
+  const asked = db.prepare("SELECT * FROM cleanings WHERE status='approved' AND group_known_date = date AND cleaner_confirmed_at IS NULL AND date >= ? ORDER BY date").all(todayIn(config.timezone));
+  const cleaner = h(config.cleaner?.name || 'the cleaner');
   const pendingMsgs = db.prepare("SELECT g.*, c.date FROM group_messages g JOIN cleanings c ON c.id = g.cleaning_id WHERE g.status='pending' ORDER BY g.created_at").all();
   const awaiting = db.prepare("SELECT * FROM cleanings WHERE status='awaiting_approval' ORDER BY date").all();
   return [
     ...pendingMsgs.map(m => `<tr><td>${h(prettyDate(m.date))}</td><td><span class="pill">Text the group?</span> ${h(m.body)}</td><td><a class="btn" href="/?month=${m.date.slice(0, 7)}&msg=${m.token}">Decide</a></td></tr>`),
     ...awaiting.map(c => `<tr><td>${h(prettyDate(c.date))}</td><td><span class="pill">Needs approval</span> ${h(service.describe(c))}</td><td><a class="btn" href="/?month=${c.date.slice(0, 7)}&review=${c.id}">Review</a></td></tr>`),
+    ...asked.map(c => `<tr><td><a href="/cleanings/${c.id}">${h(prettyDate(c.date))}</a></td><td><span class="pill asked">Waiting on ${cleaner}</span> Texted to the group. Did ${cleaner} say yes?</td><td><form method="post" action="/cleanings/${c.id}/confirm"><input type="hidden" name="back" value="inbox"><button>${cleaner} confirmed</button></form></td></tr>`),
   ];
 }
 
@@ -442,7 +489,7 @@ export function dashboard({ config, service, db, month, who, flash, review, msg,
   if (pendingMsg && pendingMsg.status !== 'pending' && !flash) flash = pendingMsg.status === 'sent' ? 'That text was already sent to the group.' : 'That text was already decided.';
   const { today, cleanings, bookings } = pageData({ config, service, db, month });
   const lastSync = JSON.parse(db.prepare("SELECT value FROM meta WHERE key='last_sync'").get()?.value || 'null');
-  const waiting = decisionsList({ db, service, who }).length;
+  const waiting = decisionsList({ db, service, who, config }).length;
   const missing = Object.entries(stayReadiness(bookings, cleanings, today)).filter(([, v]) => v === 'missing').length;
   const alerts = [
     waiting ? `<a href="/inbox">${waiting} thing${waiting === 1 ? '' : 's'} waiting on you &rsaquo;</a>` : '',
@@ -459,7 +506,7 @@ ${pendingMsg?.status === 'pending' ? groupDialog({ db, config, m: pendingMsg, wh
 
 export function inboxPage({ config, service, db, who }) {
   const { today, cleanings } = pageData({ config, service, db });
-  const decisions = decisionsList({ db, service, who }).join('');
+  const decisions = decisionsList({ db, service, who, config }).join('');
   const upcoming = cleanings.filter(c => c.date >= today && !['cancelled', 'declined'].includes(c.status));
   const rows = upcoming.map(c => `<tr><td><a href="/cleanings/${c.id}"><b>${h(prettyDate(c.date))}</b></a><div class="muted">${c.source === 'manual' ? 'Added by hand' : 'Airbnb'}${c.note ? ` · ${h(c.note)}` : ''}</div></td>
 <td><div class="stages">${service.stageOf(c).map(s => `<span class="stage ${s.done ? 'done' : ''}">${h(s.name)}</span>`).join('')}</div></td>
