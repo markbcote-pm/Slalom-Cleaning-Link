@@ -126,14 +126,55 @@ export function createService({ db, config, notifier }) {
 
   // ---- Changes made by hand on the dashboard ----------------------------------------
 
-  async function addManual(date, note, by) {
+  // The stays on either side of a date: the one that checked out on or before it, and the
+  // next one checking in on or after it. A cleaning between them covers that turnover.
+  function windowFor(date) {
+    const prior = db.prepare("SELECT * FROM bookings WHERE status='active' AND check_out <= ? ORDER BY check_out DESC LIMIT 1").get(date) || null;
+    const next = db.prepare("SELECT * FROM bookings WHERE status='active' AND check_in >= ? ORDER BY check_in LIMIT 1").get(date) || null;
+    return { prior, next };
+  }
+
+  // Any live cleaning already covering the turnover after a stay's checkout.
+  function cleaningInWindow(checkOut, nextCheckIn, excludeId = 0) {
+    const end = nextCheckIn || addDays(checkOut, 14);
+    return db.prepare(`SELECT * FROM cleanings WHERE status NOT IN ('cancelled','declined') AND date >= ? AND date <= ? AND id != ?
+      ORDER BY date LIMIT 1`).get(checkOut, end, excludeId) || null;
+  }
+
+  // alreadyArranged: Mark already agreed the day with the cleaner, so nothing is texted and
+  // the group counts as knowing about it (later moves or cancellations still ask first).
+  async function addManual(date, note, by, { alreadyArranged = false } = {}) {
     const r = db.prepare(`INSERT INTO cleanings (source, date, note, status, approved_by, approved_at, sequence, created_at, updated_at)
       VALUES ('manual', ?, ?, 'approved', ?, ?, 0, ?, ?)`).run(date, note || null, by, nowIso(), nowIso(), nowIso());
-    const c = get(Number(r.lastInsertRowid));
-    logEvent(c.id, 'Booked', `Added by hand by ${by}`);
+    let c = get(Number(r.lastInsertRowid));
+    logEvent(c.id, 'Booked', `Scheduled by hand by ${by}`);
     logEvent(c.id, 'Approved', `by ${by}`);
+
+    // Take over the turnover this day sits in, so the app doesn't propose another cleaning for it.
+    const { prior } = windowFor(date);
+    let replaced = null, conflict = null;
+    if (prior) {
+      const existing = db.prepare('SELECT * FROM cleanings WHERE booking_uid = ?').get(prior.uid);
+      if (existing && existing.status === 'awaiting_approval') {
+        update(existing.id, { status: 'cancelled', approval_token: null, booking_uid: null });
+        logEvent(existing.id, 'Cancelled', `Replaced by the ${prettyDate(date)} cleaning ${by} scheduled by hand`);
+        replaced = existing;
+      } else if (existing && !['cancelled', 'declined'].includes(existing.status)) {
+        conflict = existing;
+      }
+      if (!conflict) {
+        if (existing) update(existing.id, { booking_uid: null });
+        c = update(c.id, { booking_uid: prior.uid });
+      }
+    }
+
+    if (alreadyArranged) {
+      c = update(c.id, { group_known_date: date });
+      logEvent(c.id, 'Cleaner texted', `Arranged directly with ${config.cleaner?.name || 'the cleaner'}, no text sent`);
+      return { cleaning: c, replaced, conflict };
+    }
     const msg = await askAboutGroupMessage(c, 'added', `CLEANING ADDED: ${describe(c)}`);
-    return { cleaning: c, message: msg };
+    return { cleaning: c, message: msg, replaced, conflict };
   }
 
   async function move(id, newDate, by, { fromAirbnb = false } = {}) {
@@ -226,7 +267,7 @@ export function createService({ db, config, notifier }) {
   }
 
   return {
-    get, list, stageOf, describe, requestApproval, approve, decline, decideGroupMessage, addManual, move, cancel,
+    get, list, stageOf, describe, windowFor, cleaningInWindow, requestApproval, approve, decline, decideGroupMessage, addManual, move, cancel,
     customGroupMessage, autoComplete, recordPaymentRequest, markPaid, logEvent, update,
   };
 }

@@ -37,6 +37,18 @@ export async function syncAirbnb({ db, config, service, fetchImpl = globalThis.f
     const cleaning = db.prepare('SELECT * FROM cleanings WHERE booking_uid = ?').get(r.uid);
     if (!cleaning) {
       if (r.end < today) continue; // past stays: nothing to schedule
+      // If a cleaning is already scheduled between this checkout and the next check-in
+      // (for example one Mark arranged by hand), don't propose another; adopt it instead.
+      const nextIn = db.prepare("SELECT check_in FROM bookings WHERE status='active' AND check_in >= ? AND uid != ? ORDER BY check_in LIMIT 1").get(r.end, r.uid)?.check_in;
+      const covering = service.cleaningInWindow(r.end, nextIn);
+      if (covering) {
+        if (!covering.booking_uid) {
+          service.update(covering.id, { booking_uid: r.uid });
+          service.logEvent(covering.id, 'Linked', `Covers the Airbnb stay ${r.start} to ${r.end}`);
+        }
+        result.covered = (result.covered || 0) + 1;
+        continue;
+      }
       const ins = db.prepare(`INSERT INTO cleanings (booking_uid, source, date, status, sequence, created_at, updated_at)
         VALUES (?, 'airbnb', ?, 'awaiting_approval', 0, ?, ?)`).run(r.uid, r.end, stamp, stamp);
       const c = service.get(Number(ins.lastInsertRowid));
