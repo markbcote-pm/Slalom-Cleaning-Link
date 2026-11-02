@@ -91,6 +91,15 @@ export function createApp(config, deps = {}) {
       }
       const body = await readBody(req);
       const by = validName(body.get('by'));
+      if (body.get('send') === 'test') {
+        const t = await service.testGroupMessage(m[1], by, body.get('body'));
+        const fresh = db.prepare('SELECT * FROM group_messages WHERE token = ?').get(m[1]);
+        const c = service.get(fresh.cleaning_id);
+        const staying = !!db.prepare("SELECT 1 FROM bookings WHERE status='active' AND check_in < ? AND check_out > ?").get(c.date, c.date);
+        const note = t.error ? t.error
+          : `Test sent only to ${t.to.name}${t.to.phone ? ` (${t.to.phone})` : ` by email`}.${t.dryRun ? ' Texting is still in test mode, so it was logged on the More tab instead of really sent.' : ''} The group got nothing.`;
+        return send(res, 200, groupDecisionPage(fresh, c, by, config.approvers, staying && !['cancelled', 'declined'].includes(c.status), note));
+      }
       const r = await service.decideGroupMessage(m[1], body.get('send') === '1', by, body.get('body'));
       if (r.error) return send(res, 404, messagePage('Link expired', r.error));
       const back = authed(req) ? '<p><a class="btn" href="/">Back to dashboard</a></p>' : '';

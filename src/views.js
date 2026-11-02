@@ -71,7 +71,7 @@ export function approvalPage(c, describe, token, by, approvers) {
 <button name="action" value="approve">Approve and text the group</button><button class="danger" name="action" value="decline">Decline</button></form></div>`);
 }
 
-export function groupDecisionPage(m, c, by, approvers, guestsStaying = false) {
+export function groupDecisionPage(m, c, by, approvers, guestsStaying = false, flash = '') {
   if (m.status !== 'pending') {
     return messagePage('Already decided', m.status === 'sent' ? `This was sent to the group${m.decided_by ? ` by ${m.decided_by}` : ''}.` : `This was ${m.status}.`, '<p><a class="btn" href="/">Back to dashboard</a></p>');
   }
@@ -79,9 +79,11 @@ export function groupDecisionPage(m, c, by, approvers, guestsStaying = false) {
   return layout('Text the group?', `<div class="card"><h1>Text the group about this change?</h1>
 <p class="muted">Cleaning on ${h(prettyDate(c.date))} is now <b>${h(c.status.replace('_', ' '))}</b>. Your cleaner treats the group text as the source of truth, so nothing goes out unless you say so.</p>
 ${guestsStaying ? `<p class="pill" style="display:inline-block">Heads up: guests are staying at the house on ${h(prettyDate(c.date))}.</p>` : ''}
+${flash ? `<div class="flash">${h(flash)}</div>` : ''}
 <form method="post"><textarea name="body">${h(m.body)}</textarea>
-<div class="row" style="margin-top:10px"><select name="by">${who}</select>
-<button name="send" value="1">Send to group</button><button class="ghost" name="send" value="0">Don't send</button></div></form></div>`);
+<div class="row" style="margin-top:10px"><select name="by" aria-label="Who is deciding">${who}</select>
+<button name="send" value="1">Send to group</button><button class="ghost" name="send" value="test">Send me a test</button><button class="ghost" name="send" value="0">Don't send</button></div></form>
+<p class="muted" style="margin-bottom:0">"Send me a test" texts this message only to the person picked above, so you can see how it reads. The group gets nothing until you press "Send to group."</p></div>`);
 }
 
 // Airbnb's export has no guest names, only the last 4 digits of the guest's phone.
