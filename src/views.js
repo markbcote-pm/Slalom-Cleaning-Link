@@ -21,7 +21,7 @@ table{width:100%;border-collapse:collapse}td,th{padding:8px 6px;border-top:1px s
 .week{display:grid;grid-template-columns:repeat(14,minmax(0,1fr));grid-template-rows:22px 24px 24px 26px;column-gap:0;row-gap:3px;position:relative}
 .day{cursor:pointer;grid-row:1/-1;min-width:0;border:1px solid var(--line);border-radius:8px;padding:2px 5px;font-size:12px;margin:0 2px}.day.out{opacity:.45}.day:hover{background:var(--win)}.day[data-past]{cursor:default}.day[data-past]:hover{background:none}.day.today{border-color:var(--accent);border-width:2px}.day.over{outline:2px dashed var(--accent)}
 .bar{pointer-events:none;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:12px;line-height:22px;padding:0 6px;border-radius:11px;z-index:1}
-.stay-bar{grid-row:2;background:var(--stay);color:#fff;font-weight:600}.stay-bar.pending{background:var(--s-pending)}.stay-bar.missing{background:var(--s-missing)}.stay-bar.past{background:var(--s-past)}.stay-bar.flagged{box-shadow:inset 0 0 0 2px #ffd43b}.stay-bar.cont-l{border-top-left-radius:0;border-bottom-left-radius:0}.stay-bar.cont-r{border-top-right-radius:0;border-bottom-right-radius:0}
+.stay-bar{grid-row:2;background:var(--stay);color:#fff;font-weight:600}.stay-bar.pending{background:var(--s-pending)}.stay-bar.missing{background:var(--s-missing)}.stay-bar.past{background:var(--s-past)}.stay-bar.personal{background-image:repeating-linear-gradient(135deg,rgba(255,255,255,.18) 0 6px,transparent 6px 12px)}.stay-bar.flagged{box-shadow:inset 0 0 0 2px #ffd43b}.stay-bar.cont-l{border-top-left-radius:0;border-bottom-left-radius:0}.stay-bar.cont-r{border-top-right-radius:0;border-bottom-right-radius:0}
 .win-bar{grid-row:3;background:var(--win);color:var(--win-ink);border:1px dashed var(--win-line);line-height:20px;font-size:11px}
 .win-bar.open,.win-bar.past{background:transparent;color:var(--muted);border-color:var(--line)}
 .win-bar.pending{background:var(--pending);color:var(--pending-ink);border-color:var(--s-pending)}
@@ -46,6 +46,7 @@ body.dragging .bar,body.dragging .chip{pointer-events:none}
 details summary{cursor:pointer;font-size:13px}label{font-size:14px}
 .chip small{font-weight:400}
 dialog{border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink);padding:18px;width:min(440px,calc(100vw - 32px))}dialog::backdrop{background:rgba(0,0,0,.4)}
+.personal-add{margin-top:14px;border-top:1px solid var(--line);padding-top:10px}.personal-add summary{font-weight:600}
 .dialog-actions{display:flex;flex-direction:column;gap:8px;margin-top:12px}code{word-break:break-all}
 `;
 
@@ -117,6 +118,8 @@ export function stayReadiness(bookings, cleanings, today) {
     if (!prev) { out[b.uid] = 'ready'; continue; }
     const inGap = live.filter(c => c.date >= prev.check_out && c.date <= b.check_in);
     out[b.uid] = inGap.some(c => c.status !== 'awaiting_approval') ? 'ready' : inGap.length ? 'pending' : 'missing';
+    // Your own stays don't raise the alarm if the house wasn't cleaned before you arrive.
+    if (b.source === 'personal' && out[b.uid] === 'missing') out[b.uid] = 'ready';
   }
   return out;
 }
@@ -161,7 +164,7 @@ function calendar(month, cleanings, bookings, tz, config, extras = { counts: {},
       const nights = daysBetween(b.check_in, b.check_out);
       const flag = extras.flagged.has(b.uid);
       const st = ready[b.uid] || 'ready';
-      html += `<div class="bar stay-bar ${st}${cut}${flag ? ' flagged' : ''}" style="grid-column:${s}/${e}" title="${h(guestLabel(b))}: ${h(prettyDate(b.check_in))} to ${h(prettyDate(b.check_out))}, ${nights} night${nights === 1 ? '' : 's'}. ${READINESS_NOTE[st]}${flag ? '. Has notes to raise with Airbnb' : ''}">${flag ? '⚠ ' : ''}${st === 'missing' ? '! ' : ''}${h(guestLabel(b))}</div>`;
+      html += `<div class="bar stay-bar ${st}${b.source === 'personal' ? ' personal' : ''}${cut}${flag ? ' flagged' : ''}" style="grid-column:${s}/${e}" title="${h(guestLabel(b))}: ${h(prettyDate(b.check_in))} to ${h(prettyDate(b.check_out))}, ${nights} night${nights === 1 ? '' : 's'}. ${READINESS_NOTE[st]}${flag ? '. Has notes to raise with Airbnb' : ''}">${flag ? '⚠ ' : ''}${st === 'missing' ? '! ' : ''}${b.source === 'personal' ? '⌂ ' : ''}${h(guestLabel(b))}</div>`;
     }
     for (const win of windows) {
       const end = win.to || addDays(we, 1);
@@ -187,7 +190,7 @@ function calendar(month, cleanings, bookings, tz, config, extras = { counts: {},
 
   return `<div class="row" style="justify-content:space-between"><h2>${label}</h2><div class="row">
 <a class="btn" href="/?month=${prev}">&lsaquo;</a><a class="btn" href="/?month=${next}">&rsaquo;</a></div></div>
-<div class="legend"><b>Stays:</b><span><i class="bar stay-bar ready"></i>Cleaning set before check-in</span><span><i class="bar stay-bar pending"></i>Cleaning waiting for approval</span><span><i class="bar stay-bar missing"></i>No cleaning before check-in</span><span><i class="bar stay-bar past"></i>Past</span></div>
+<div class="legend"><b>Stays:</b><span><i class="bar stay-bar ready"></i>Cleaning set before check-in</span><span><i class="bar stay-bar pending"></i>Cleaning waiting for approval</span><span><i class="bar stay-bar missing"></i>No cleaning before check-in</span><span><i class="bar stay-bar past"></i>Past</span><span><i class="bar stay-bar ready personal"></i>⌂ Personal stay</span></div>
 <div class="legend"><b>Cleanings:</b><span><i class="chip approved"></i>Confirmed (✎ = notes)</span><span><i class="chip awaiting_approval"></i>Needs approval</span><span>⚠ Something to raise with Airbnb</span></div>
 <div class="dows">${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => `<div>${d}</div>`).join('')}</div>
 <div class="cal" id="cal">${weeks.join('')}</div>
@@ -199,10 +202,16 @@ function calendar(month, cleanings, bookings, tz, config, extras = { counts: {},
 <div class="dialog-actions"><button name="arranged" value="1">Schedule, already arranged with ${h(config.cleaner?.name || 'the cleaner')}</button>
 <button class="ghost" name="arranged" value="0">Schedule and text the group</button>
 <button class="ghost" type="button" id="add-cancel">Cancel</button></div>
-<p class="muted" style="margin-bottom:0">"Already arranged" adds it without texting anyone. "Text the group" shows you the message before it goes out.</p></form></dialog>
+<p class="muted" style="margin-bottom:0">"Already arranged" adds it without texting anyone. "Text the group" shows you the message before it goes out.</p></form>
+<details class="personal-add"><summary>Or add a personal stay starting this day</summary>
+<form method="post" action="/personal" class="row" style="margin-top:8px"><input type="hidden" name="check_in" id="ps-in">
+<label class="muted">Leaving <input type="date" name="check_out" id="ps-out" required></label>
+<input name="name" placeholder="Who's staying (optional)" style="flex:1;min-width:150px"><button>Add personal stay</button></form>
+<p class="muted" style="margin-bottom:0">A cleaning is proposed for the day you leave, unless one is already scheduled.</p></details></dialog>
 <script>
 const dlg=document.getElementById('add-dialog');
-function openAdd(d){if(d.dataset.past)return;document.getElementById('add-date').value=d.dataset.date;document.getElementById('add-title').textContent='Add a cleaning on '+d.dataset.label;
+function openAdd(d){if(d.dataset.past)return;document.getElementById('add-date').value=d.dataset.date;
+document.getElementById('ps-in').value=d.dataset.date;const o=document.getElementById('ps-out');o.min=d.dataset.date;const nx=new Date(d.dataset.date+'T12:00:00Z');nx.setUTCDate(nx.getUTCDate()+2);o.value=nx.toISOString().slice(0,10);document.getElementById('add-title').textContent='Add a cleaning on '+d.dataset.label;
 const w=[];if(d.dataset.staying)w.push('Guests are staying that day.');if(d.dataset.turnover)w.push('Same-day turnover: the window is ${prettyTime(config.checkoutTime)} to ${prettyTime(config.checkinTime)}.');if(d.dataset.booked)w.push('There is already a cleaning that day.');
 const el=document.getElementById('add-warn');el.textContent=w.join(' ');el.hidden=!w.length;document.getElementById('add-note').value='';dlg.showModal();}
 document.getElementById('add-cancel').addEventListener('click',()=>dlg.close());
@@ -337,7 +346,7 @@ function staysCard(bookings, today, config, cleanings = []) {
       : '';
     return `<tr><td><form method="post" action="/bookings/name" class="row"><input type="hidden" name="uid" value="${h(b.uid)}">
 <input name="name" value="${h(b.guest_name || '')}" placeholder="${h(guestLabel(b))}" style="width:150px"><button class="ghost">Save</button></form></td>
-<td>${h(prettyDate(b.check_in))} to ${h(prettyDate(b.check_out))}<div class="muted">${nights} night${nights === 1 ? '' : 's'}</div></td><td>${gap}${plan}${form}</td></tr>`;
+<td>${b.source === 'personal' ? '<b>⌂ Personal</b><br>' : ''}${h(prettyDate(b.check_in))} to ${h(prettyDate(b.check_out))}<div class="muted">${nights} night${nights === 1 ? '' : 's'}</div></td><td>${gap}${plan}${form}</td></tr>`;
   }).join('');
   return `<div class="card"><h2>Stays and cleaning windows</h2>
 <p class="muted">Airbnb's calendar link doesn't include guest names, only the last 4 digits of their phone. Type a name here and it shows on the calendar. "Schedule" books a cleaning you've already arranged, without texting anyone.</p>
@@ -394,15 +403,32 @@ export function inboxPage({ config, service, db, who }) {
 <div class="card"><h2>Upcoming cleanings</h2>${rows ? `<div class="scroll"><table><tr><th>Day</th><th>Progress</th><th>Change</th></tr>${rows}</table></div>` : '<p class="muted">Nothing scheduled.</p>'}</div>`);
 }
 
-export function staysPage({ config, service, db, who }) {
+export function staysPage({ config, service, db, who, flash }) {
   const { today, cleanings, bookings } = pageData({ config, service, db });
   const cleaner = h(config.cleaner?.name || 'the cleaner');
   return layout('Stays', `${header({ config, db, who, active: 'stays' })}
+${flash ? `<div class="flash">${h(flash)}</div>` : ''}
 ${staysCard(bookings, today, config, cleanings)}
+${personalCard(bookings, today)}
 <div class="card"><h2>Schedule a cleaning</h2><form method="post" action="/cleanings">
 <div class="row"><input type="date" name="date" required min="${today}"><input name="note" placeholder="Note (optional)" style="flex:1;min-width:180px"></div>
 <div class="row" style="margin-top:8px"><button name="arranged" value="1">Schedule, already arranged with ${cleaner}</button><button class="ghost" name="arranged" value="0">Schedule and text the group</button></div></form>
 <p class="muted">You can also tap a day on the calendar. A scheduled cleaning covers the turnover it falls in, so the app won't propose another one between those two stays.</p></div>`);
+}
+
+function personalCard(bookings, today) {
+  const mine = bookings.filter(b => b.source === 'personal' && b.check_out >= today).sort((a, b) => a.check_in.localeCompare(b.check_in));
+  const rows = mine.map(b => `<tr><td><form method="post" action="/personal/${h(b.uid)}" class="row">
+<input name="name" value="${h(b.guest_name || '')}" placeholder="Who's staying" style="width:150px">
+<input type="date" name="check_in" value="${b.check_in}" required><input type="date" name="check_out" value="${b.check_out}" required>
+<button class="ghost">Save</button></form></td>
+<td><form method="post" action="/personal/${h(b.uid)}/delete" onsubmit="return confirm('Remove this personal stay and its proposed cleaning?')"><button class="danger">Remove</button></form></td></tr>`).join('');
+  return `<div class="card" id="personal"><h2>Personal stays</h2>
+<p class="muted">Airbnb only shows these as blocked dates, so add them here. A cleaning is proposed for the day you leave (it appears under "Waiting on you"), unless one is already scheduled before the next guests. You can also tap a day on the calendar.</p>
+<form method="post" action="/personal" class="row"><label class="muted">Arriving <input type="date" name="check_in" required min="${today}"></label>
+<label class="muted">Leaving <input type="date" name="check_out" required min="${today}"></label>
+<input name="name" placeholder="Who's staying (optional)" style="flex:1;min-width:150px"><button>Add personal stay</button></form>
+${rows ? `<div class="scroll" style="margin-top:10px"><table>${rows}</table></div>` : ''}</div>`;
 }
 
 export function paymentsPage({ config, db, who }) {

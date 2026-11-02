@@ -380,3 +380,39 @@ test('stay colors: ready, pending, missing, past', () => {
   ];
   assert.deepEqual(stayReadiness(bookings, cleanings, '2026-11-02'), { old: 'past', a: 'missing', b: 'ready', c: 'pending', d: 'missing' });
 });
+
+test('personal stays: cleaning proposed for departure day, survives Airbnb sync, edit and remove', async () => {
+  const { app, outbox, clearOutbox, sync } = setup();
+  await sync([['s1', '2026-11-05', '2026-11-08'], ['s2', '2026-11-20', '2026-11-22']]);
+  clearOutbox();
+  const r = await app.service.addPersonalStay({ checkIn: '2026-11-12', checkOut: '2026-11-15', name: 'Cote family', by: 'Mark' });
+  assert.equal(r.cleaning.date, '2026-11-15');
+  assert.equal(r.cleaning.status, 'awaiting_approval');
+  assert.equal(outbox().length, 0, 'no text: it shows under Waiting on you');
+  assert.equal(r.clash.length, 0);
+
+  // Airbnb doesn't know about it, but sync must not cancel it.
+  const s = await sync([['s1', '2026-11-05', '2026-11-08'], ['s2', '2026-11-20', '2026-11-22']]);
+  assert.equal(s.cancelled, 0);
+  assert.equal(app.db.prepare('SELECT status FROM bookings WHERE uid = ?').get(r.booking.uid).status, 'active');
+
+  // Personal stay with no cleaning before it isn't flagged orange.
+  const { stayReadiness } = await import('../src/views.js');
+  const bookings = app.db.prepare("SELECT * FROM bookings WHERE status='active'").all();
+  const noCleanings = app.db.prepare("SELECT * FROM cleanings WHERE booking_uid != 's1'").all();  // nothing between s1 and this stay
+  const ready = stayReadiness(bookings, noCleanings, '2026-11-02');
+  assert.equal(ready[r.booking.uid], 'ready');
+
+  // Leaving a day later moves the proposed cleaning with it.
+  await app.service.updatePersonalStay(r.booking.uid, { checkIn: '2026-11-12', checkOut: '2026-11-16', name: 'Cote family', by: 'Mark' });
+  assert.equal(app.service.get(r.cleaning.id).date, '2026-11-16');
+
+  // Overlap with an Airbnb booking is reported.
+  const clash = await app.service.addPersonalStay({ checkIn: '2026-11-21', checkOut: '2026-11-23', name: '', by: 'Mark' });
+  assert.equal(clash.clash[0].uid, 's2');
+
+  // Removing it cancels its cleaning (never texted, so nothing to ask).
+  const rm = await app.service.removePersonalStay(r.booking.uid, 'Mark');
+  assert.equal(rm.message, undefined);
+  assert.equal(app.service.get(r.cleaning.id).status, 'cancelled');
+});
