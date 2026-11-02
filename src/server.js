@@ -11,6 +11,7 @@ import { cleaningFeed } from './feed.js';
 import { isDate, todayIn, prettyDate, localToUtc } from './dates.js';
 import { layout, messagePage, approvalPage, groupDecisionPage, dashboard, notesPage, todosPage, cleaningPage, inboxPage, staysPage, paymentsPage, morePage, loginPage } from './views.js';
 import { createNotes, validTwilioSignature } from './notes.js';
+import { createPush, SERVICE_WORKER } from './push.js';
 import { smsInfoPage, privacyPage, termsPage, confirmationText } from './policy.js';
 
 const ASSETS = {
@@ -24,6 +25,7 @@ export function createApp(config, deps = {}) {
   const notifier = deps.notifier || createNotifier(db, config, deps);
   const service = createService({ db, config, notifier });
   const notes = createNotes({ db, config });
+  const push = deps.push || createPush({ db, config, fetchImpl: deps.fetchImpl });
   const sync = (opts = {}) => syncAirbnb({ db, config, service, fetchImpl: deps.fetchImpl, ...opts });
 
   const safeEq = (a, b) => {
@@ -97,6 +99,7 @@ export function createApp(config, deps = {}) {
       const [file, type] = ASSETS[p];
       return send(res, 200, fs.readFileSync(new URL('../public/' + file, import.meta.url)), type, { 'Cache-Control': 'public, max-age=86400' });
     }
+    if (req.method === 'GET' && p === '/sw.js') return send(res, 200, SERVICE_WORKER, 'text/javascript; charset=utf-8', { 'Cache-Control': 'no-cache' });
     if (req.method === 'GET' && p === '/manifest.webmanifest') {
       return send(res, 200, JSON.stringify({
         name: 'Cleaning Link', short_name: 'Cleaning', start_url: '/', display: 'standalone',
@@ -243,7 +246,7 @@ export function createApp(config, deps = {}) {
     if (req.method === 'GET' && p === '/inbox') return send(res, 200, inboxPage({ config, service, db, who }));
     if (req.method === 'GET' && p === '/stays') return send(res, 200, staysPage({ config, service, db, who, flash: url.searchParams.get('flash') }));
     if (req.method === 'GET' && p === '/payments') return send(res, 200, paymentsPage({ config, db, who }));
-    if (req.method === 'GET' && p === '/more') return send(res, 200, morePage({ config, db, who, flash: url.searchParams.get('flash') }));
+    if (req.method === 'GET' && p === '/more') return send(res, 200, morePage({ config, db, who, flash: url.searchParams.get('flash'), push }));
     if (req.method === 'GET' && p === '/todos') return send(res, 200, todosPage({ config, db, who }));
     m = p.match(/^\/cleanings\/(\d+)$/);
     if (req.method === 'GET' && m) {
@@ -253,6 +256,17 @@ export function createApp(config, deps = {}) {
     if (req.method !== 'POST') return send(res, 404, 'Not found', 'text/plain');
     const body = await readBody(req);
 
+    if (p === '/push/subscribe') {
+      let sub = null; try { sub = JSON.parse(body.get('sub') || ''); } catch {}
+      return push.subscribe(sub, who || 'someone') ? send(res, 200, '{"ok":true}', 'application/json') : send(res, 400, '{"ok":false}', 'application/json');
+    }
+    if (p === '/push/unsubscribe') { push.unsubscribe(body.get('endpoint') || ''); return send(res, 200, '{"ok":true}', 'application/json'); }
+    if (p === '/push/test') {
+      const items = push.unsettled();
+      const r = await push.send({ title: 'Cleaning Link test', body: items.length ? `Right now: ${items[0].text}${items.length > 1 ? ` (+${items.length - 1} more)` : ''}` : 'Notifications work. Nothing in the next 7 days needs you.', url: '/inbox' });
+      const ok = r.filter(x => x.ok).length;
+      return redirect(res, '/more?flash=' + encodeURIComponent(!r.length ? 'No phones have notifications turned on yet.' : `Test notification sent to ${ok} of ${r.length} device${r.length === 1 ? '' : 's'}.${ok < r.length ? ' One or more failed; turn notifications off and on again on that phone.' : ''}`) + '#push');
+    }
     if (p === '/who') {
       const back = req.headers.referer ? new URL(req.headers.referer).pathname : '/';
       return redirect(res, back, { 'Set-Cookie': `who=${encodeURIComponent(validName(body.get('name')))}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax` });
@@ -437,13 +451,14 @@ export function createApp(config, deps = {}) {
     const tick = async () => {
       try { const r = await sync(); if (!r.skipped) console.log('Airbnb sync', r); } catch (e) { console.error('Airbnb sync failed:', e.message); }
       try { await service.autoComplete(); } catch (e) { console.error('Auto-complete failed:', e.message); }
+      try { const r = await push.dailyReminder(); if (r.sent) console.log('Push reminder', r.items.length); } catch (e) { console.error('Push reminder failed:', e.message); }
     };
     tick();
     timer = setInterval(tick, Math.max(5, config.syncMinutes) * 60 * 1000);
   }
   const stop = () => { clearInterval(timer); server.close(); };
 
-  return { server, db, service, notes, sync, notifier, startBackground, stop };
+  return { server, db, service, notes, sync, notifier, push, startBackground, stop };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

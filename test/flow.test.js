@@ -825,3 +825,75 @@ test('Logo, app icons and manifest are served without a login', async () => {
     assert.match(login, /class="brand"><img src="\/icon.svg"/);
   } finally { app.stop(); }
 });
+
+test('Phone notifications: encrypted Web Push that a browser can decrypt, and a 9 AM reminder for unsettled cleanings in the next 7 days', async () => {
+  const sent = [];
+  const fetchImpl = async (url, opts) => { sent.push({ url, ...opts }); return { ok: true, status: 201 }; };
+  const app = createApp(loadConfig({ DOTENV: '0', DB_FILE: ':memory:', DRY_RUN: '1', ADMIN_PASSWORD: 'pw', APPROVERS: 'Mark:+12075550000:', CLEANER: 'Jenn:', TIMEZONE: 'America/Los_Angeles', BASE_URL: 'https://app.example' }), { fetchImpl });
+  await new Promise(r => app.server.listen(0, r));
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const auth = { Authorization: 'Basic ' + Buffer.from('x:pw').toString('base64') };
+  try {
+    assert.equal((await fetch(base + '/sw.js')).status, 200);
+    // A "phone": its own key pair and auth secret, as a browser makes them.
+    const ua = crypto.createECDH('prime256v1'); const uaPub = ua.generateKeys(); const authSecret = crypto.randomBytes(16);
+    const sub = { endpoint: 'https://fcm.googleapis.com/fcm/send/abc', keys: { p256dh: uaPub.toString('base64url'), auth: authSecret.toString('base64url') } };
+    assert.equal((await fetch(base + '/push/subscribe', { method: 'POST', headers: auth, body: new URLSearchParams({ sub: JSON.stringify(sub) }) })).status, 200);
+    const more = await (await fetch(base + '/more', { headers: auth })).text();
+    assert.match(more, /Phone notifications[\s\S]*Turned on for Mark/);
+
+    // Nothing unsettled: no alert. Then a stay arrives in 5 days with no cleaning, and one
+    // cleaning is waiting on Jenn: the 9 AM run alerts once that day.
+    const at9 = (d) => new Date(localToUtc(d, '09:05', 'America/Los_Angeles'));
+    const today = '2030-03-10';
+    assert.equal((await app.push.dailyReminder(new Date(localToUtc(today, '08:00', 'America/Los_Angeles')))).skipped, 'before 9 AM');
+    const now = new Date().toISOString();
+    const ins = app.db.prepare('INSERT INTO bookings (uid,check_in,check_out,status,first_seen,last_seen,guest_name) VALUES (?,?,?,?,?,?,?)');
+    ins.run('a', '2030-03-05', '2030-03-11', 'active', now, now, 'Chen');
+    ins.run('b', '2030-03-15', '2030-03-18', 'active', now, now, 'Lopez');
+    ins.run('c', '2030-03-25', '2030-03-27', 'active', now, now, 'Far');
+    const { message } = await app.service.addManual('2030-03-12', null, 'Mark');
+    await app.service.decideGroupMessage(message.token, true, 'Mark');
+    app.db.prepare("UPDATE cleanings SET date='2030-03-11', group_known_date='2030-03-11'").run();
+    const r = await app.push.dailyReminder(at9(today));
+    assert.deepEqual(r.items.map(i => i.text), ['Mon, Mar 11 cleaning waiting on Jenn']);
+    assert.equal(sent.length, 1);
+    assert.equal((await app.push.dailyReminder(at9(today))).skipped, 'already sent today');
+    // Next day the cleaning has moved past Lopez's arrival (and beyond the 7-day window).
+    app.db.prepare("UPDATE cleanings SET date='2030-03-20', group_known_date='2030-03-20'").run();
+    const r2 = await app.push.dailyReminder(at9('2030-03-11'));
+    assert.deepEqual(r2.items.map(i => i.text), ['Lopez arrives Fri, Mar 15 with no cleaning set']);
+
+    // The request is what a push service expects, and the phone can decrypt it (RFC 8291).
+    const req = sent[1];
+    assert.equal(req.url, sub.endpoint);
+    assert.equal(req.headers['Content-Encoding'], 'aes128gcm');
+    const [, token, k] = req.headers.Authorization.match(/^vapid t=([^,]+), k=(.+)$/);
+    const [h64, c64, s64] = token.split('.');
+    assert.equal(JSON.parse(Buffer.from(c64, 'base64url')).aud, 'https://fcm.googleapis.com');
+    const vpub = Buffer.from(k, 'base64url');
+    const vkey = crypto.createPublicKey({ key: { kty: 'EC', crv: 'P-256', x: vpub.subarray(1, 33).toString('base64url'), y: vpub.subarray(33).toString('base64url') }, format: 'jwk' });
+    assert.ok(crypto.verify('sha256', Buffer.from(`${h64}.${c64}`), { key: vkey, dsaEncoding: 'ieee-p1363' }, Buffer.from(s64, 'base64url')));
+    const body = req.body;
+    const salt = body.subarray(0, 16), idlen = body[20], asPub = body.subarray(21, 21 + idlen), ct = body.subarray(21 + idlen);
+    const hm = (key, d) => crypto.createHmac('sha256', key).update(d).digest();
+    const ikm = hm(hm(authSecret, ua.computeSecret(asPub)), Buffer.concat([Buffer.from('WebPush: info\0'), uaPub, asPub, Buffer.from([1])]));
+    const prk = hm(salt, ikm);
+    const dec = crypto.createDecipheriv('aes-128-gcm', hm(prk, Buffer.from('Content-Encoding: aes128gcm\0\x01')).subarray(0, 16), hm(prk, Buffer.from('Content-Encoding: nonce\0\x01')).subarray(0, 12));
+    dec.setAuthTag(ct.subarray(-16));
+    const plain = Buffer.concat([dec.update(ct.subarray(0, -16)), dec.final()]);
+    assert.equal(plain[plain.length - 1], 2);
+    const msg = JSON.parse(plain.subarray(0, -1));
+    assert.equal(msg.title, 'Cleaning not set yet');
+    assert.match(msg.body, /Lopez arrives/);
+    assert.equal(msg.url, '/inbox');
+
+    // A phone that unsubscribed (410) is dropped.
+    sent.length = 0;
+    const gone = createApp(loadConfig({ DOTENV: '0', DB_FILE: ':memory:', DRY_RUN: '1', APPROVERS: 'Mark:+12075550000:', CLEANER: 'Jenn:' }), { fetchImpl: async () => ({ ok: false, status: 410 }) });
+    gone.push.subscribe(sub, 'Mark');
+    await gone.push.send({ title: 't', body: 'b' });
+    assert.equal(gone.push.subscriptions().length, 0);
+    gone.stop();
+  } finally { app.stop(); }
+});
