@@ -146,6 +146,7 @@ export function createApp(config, deps = {}) {
       if (p === '/twilio/sms') {
         const from = body.get('From');
         const n = notes.add({ body: body.get('Body'), phone: from, source: 'sms' });
+        if (n) service.cleanerReply({ body: n.body, phone: from });
         // In "individual" mode there is no real group thread, so pass the text on to the others.
         if (n && config.groupMode !== 'conversation') {
           for (const person of config.groupMembers) {
@@ -159,6 +160,7 @@ export function createApp(config, deps = {}) {
         const author = body.get('Author') || '';
         notes.add({ body: body.get('Body'), phone: author.startsWith('+') ? author : null, author: author.startsWith('+') ? null : author,
           at: body.get('DateCreated') ? new Date(body.get('DateCreated')).toISOString() : undefined, source: 'group' });
+        service.cleanerReply({ body: body.get('Body'), phone: author.startsWith('+') ? author : null, author: author.startsWith('+') ? null : author });
       }
       return send(res, 200, '', 'text/plain');
     }
