@@ -681,5 +681,21 @@ test('Public SMS info, privacy and terms pages need no login and cover what carr
     assert.match(terms, /Message and data rates may apply/);
     assert.match(terms, /Message frequency varies/);
     assert.match(terms, /Reply <b>STOP<\/b>/);
+    assert.equal((await fetch(base + '/sms-terms')).status, 200);
+    assert.match(await (await fetch(base + '/sms')).text(), /reads this script word for word[\s\S]*Do you agree\?/);
+  } finally { app.stop(); }
+});
+
+test('Recording consent stores the date and sends the sign-up confirmation text', async () => {
+  const { app, outbox, clearOutbox } = setup();
+  await new Promise(r => app.server.listen(0, r));
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const auth = { Authorization: 'Basic ' + Buffer.from('x:pw').toString('base64'), Cookie: 'who=Mark' };
+  try {
+    clearOutbox();
+    const r = await fetch(base + '/texting/consent', { method: 'POST', headers: auth, body: new URLSearchParams({ phone: '+15550000003' }), redirect: 'manual' });
+    assert.match(decodeURIComponent(r.headers.get('location')), /Consent recorded for Rosa/);
+    assert.match(outbox()[0].body, /you're signed up for cleaning schedule texts.*Reply HELP for help, STOP to opt out\./);
+    assert.match(await (await fetch(base + '/more', { headers: auth })).text(), /Rosa<\/b>[\s\S]*Agreed [A-Z][a-z]{2} \d+, \d{4}, recorded by Mark/);
   } finally { app.stop(); }
 });

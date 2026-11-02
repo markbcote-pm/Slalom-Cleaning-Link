@@ -49,5 +49,7 @@ export function loadConfig(overrides = {}) {
     resend: { key: e.RESEND_API_KEY, from: e.EMAIL_FROM },
     // Shown on the public /sms, /privacy and /terms pages as the support contact (optional).
     supportEmail: e.SUPPORT_EMAIL || '',
+    // The registered A2P brand (for a Sole Proprietor brand, the owner's legal name), named on the public pages.
+    brandName: e.BRAND_NAME || '',
   };
 }

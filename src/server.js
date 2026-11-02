@@ -10,7 +10,7 @@ import { cleaningFeed } from './feed.js';
 import { isDate, todayIn, prettyDate, localToUtc } from './dates.js';
 import { layout, messagePage, approvalPage, groupDecisionPage, dashboard, notesPage, todosPage, cleaningPage, inboxPage, staysPage, paymentsPage, morePage } from './views.js';
 import { createNotes, validTwilioSignature } from './notes.js';
-import { smsInfoPage, privacyPage, termsPage } from './policy.js';
+import { smsInfoPage, privacyPage, termsPage, confirmationText } from './policy.js';
 
 export function createApp(config, deps = {}) {
   const db = deps.db || openDb(config);
@@ -63,7 +63,7 @@ export function createApp(config, deps = {}) {
     // Public pages for carrier registration (no login).
     if (req.method === 'GET' && p === '/sms') return send(res, 200, smsInfoPage(config));
     if (req.method === 'GET' && p === '/privacy') return send(res, 200, privacyPage(config));
-    if (req.method === 'GET' && p === '/terms') return send(res, 200, termsPage(config));
+    if (req.method === 'GET' && (p === '/terms' || p === '/sms-terms')) return send(res, 200, termsPage(config));
 
     // Calendar feed (secret URL, no login so calendar apps can fetch it)
     let m = p.match(/^\/feed\/([^/]+)\.ics$/);
@@ -218,6 +218,17 @@ export function createApp(config, deps = {}) {
         + (r.conflict ? ` Heads up: a cleaning on ${prettyDate(r.conflict.date)} is already scheduled for this turnover.` : '');
       if (r.message) return redirect(res, msgUrl(r.message.token));
       return redirect(res, `/?month=${date.slice(0, 7)}&flash=${encodeURIComponent(`Cleaning scheduled for ${prettyDate(date)}. Nothing was texted.${extra}`)}`);
+    }
+    if (p === '/texting/consent') {
+      const person = config.groupMembers.find(x => x.phone && x.phone === body.get('phone'));
+      const back = (msg) => redirect(res, `/more?flash=${encodeURIComponent(msg)}#texting`);
+      if (!person) return back('That number is not in the group.');
+      const key = 'consent:' + person.phone.replace(/\D/g, '').slice(-10);
+      db.prepare("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+        .run(key, JSON.stringify({ at: new Date().toISOString(), by: who, name: person.name }));
+      await notifier.sms(person.phone, confirmationText(config));
+      const last = db.prepare("SELECT status FROM outbox WHERE channel='sms' ORDER BY id DESC LIMIT 1").get();
+      return back(`Consent recorded for ${person.name}. Confirmation text ${last?.status === 'sent' ? 'sent' : last?.status === 'held' ? 'held by the safety switch' : 'logged (test mode)'}.`);
     }
     if (p === '/texting/test') {
       const me = config.approvers.find(a => a.name === who);
