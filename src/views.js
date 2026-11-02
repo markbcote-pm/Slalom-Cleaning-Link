@@ -4,8 +4,8 @@ export const h = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;'
 const money = (cents) => `$${((cents || 0) / 100).toFixed(2)}`;
 
 const CSS = `
-:root{--bg:#f7f6f3;--card:#fff;--ink:#1d1d1b;--muted:#6b6a66;--line:#e4e2dc;--accent:#2f6f5e;--accent-ink:#fff;--warn:#a5551b;--chip:#e3f0ec;--chip-ink:#1f4f42;--pending:#fbefd9;--pending-ink:#7a4a10;--stay:#3d5a80;--stay-ink:#fff;--win:#eef6f2;--win-ink:#2f6f5e;--win-line:#8fbfae;--tight:#b3412e;--tight-ring:#ffb199;--s-pending:#a16207;--s-missing:#d9480f;--s-past:#8a939e;--w-missing:#fff0e6;--w-missing-ink:#a8360a}
-@media (prefers-color-scheme:dark){:root{--bg:#141413;--card:#1e1e1c;--ink:#ecebe6;--muted:#a3a19a;--line:#33322f;--accent:#5fb39a;--accent-ink:#0f1f1a;--warn:#e19a62;--chip:#1f3a32;--chip-ink:#bfe6d9;--pending:#3a2c16;--pending-ink:#f2cf96;--stay:#5b7db0;--stay-ink:#fff;--win:#17302a;--win-ink:#9fd6c3;--win-line:#3f7a69;--tight:#d0604b;--tight-ring:#ffb199;--s-pending:#b7791f;--s-missing:#e8590c;--s-past:#4b5563;--w-missing:#3b1d0e;--w-missing-ink:#ffb48a}}
+:root{--bg:#f7f6f3;--card:#fff;--ink:#1d1d1b;--muted:#6b6a66;--line:#e4e2dc;--accent:#2f6f5e;--accent-ink:#fff;--warn:#a5551b;--chip:#e3f0ec;--chip-ink:#1f4f42;--pending:#fbefd9;--pending-ink:#7a4a10;--stay:#3d5a80;--stay-ink:#fff;--win:#eef6f2;--win-ink:#2f6f5e;--win-line:#8fbfae;--tight:#b3412e;--tight-ring:#ffb199;--s-pending:#a16207;--s-missing:#d9480f;--s-past:#8a939e;--w-missing:#fff0e6;--w-missing-ink:#a8360a;--out:#efeee9}
+@media (prefers-color-scheme:dark){:root{--bg:#141413;--card:#1e1e1c;--ink:#ecebe6;--muted:#a3a19a;--line:#33322f;--accent:#5fb39a;--accent-ink:#0f1f1a;--warn:#e19a62;--chip:#1f3a32;--chip-ink:#bfe6d9;--pending:#3a2c16;--pending-ink:#f2cf96;--stay:#5b7db0;--stay-ink:#fff;--win:#17302a;--win-ink:#9fd6c3;--win-line:#3f7a69;--tight:#d0604b;--tight-ring:#ffb199;--s-pending:#b7791f;--s-missing:#e8590c;--s-past:#4b5563;--w-missing:#3b1d0e;--w-missing-ink:#ffb48a;--out:#181817}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,Segoe UI,sans-serif}
 main{max-width:980px;margin:0 auto;padding:16px}h1{font-size:22px;margin:8px 0 4px}h2{font-size:17px;margin:0 0 10px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin:14px 0}
@@ -19,7 +19,7 @@ table{width:100%;border-collapse:collapse}td,th{padding:8px 6px;border-top:1px s
 .dows{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));font-size:12px;color:var(--muted);text-align:center;margin-bottom:4px}
 .cal{display:flex;flex-direction:column;gap:4px}
 .week{display:grid;grid-template-columns:repeat(14,minmax(0,1fr));grid-template-rows:22px 24px 24px 26px;column-gap:0;row-gap:3px;position:relative}
-.day{cursor:pointer;grid-row:1/-1;min-width:0;border:1px solid var(--line);border-radius:8px;padding:2px 5px;font-size:12px;margin:0 2px}.day.out{opacity:.45}.day:hover{background:var(--win)}.day[data-past]{cursor:default}.day[data-past]:hover{background:none}.day.today{border-color:var(--accent);border-width:2px}.day.over{outline:2px dashed var(--accent)}
+.day{cursor:pointer;grid-row:1/-1;min-width:0;border:1px solid var(--line);border-radius:8px;padding:2px 5px;font-size:12px;margin:0 2px}.day.out{background:var(--out);color:var(--muted)}.day.out b{font-weight:500}.day:hover{background:var(--win)}.day[data-past]{cursor:default}.day[data-past]:hover{background:none}.day.today{border-color:var(--accent);border-width:2px}.day.over{outline:2px dashed var(--accent)}
 .bar{pointer-events:none;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:12px;line-height:22px;padding:0 6px;border-radius:11px;z-index:1}
 .stay-bar{grid-row:2;background:var(--stay);color:#fff;font-weight:600}.stay-bar.pending{background:var(--s-pending)}.stay-bar.missing{background:var(--s-missing)}.stay-bar.past{background:var(--s-past)}.stay-bar.personal{background-image:repeating-linear-gradient(135deg,rgba(255,255,255,.18) 0 6px,transparent 6px 12px)}.stay-bar.flagged{box-shadow:inset 0 0 0 2px #ffd43b}.stay-bar.cont-l{border-top-left-radius:0;border-bottom-left-radius:0}.stay-bar.cont-r{border-top-right-radius:0;border-bottom-right-radius:0}
 .win-bar{grid-row:3;background:var(--win);color:var(--win-ink);border:1px dashed var(--win-line);line-height:20px;font-size:11px}
@@ -30,6 +30,7 @@ table{width:100%;border-collapse:collapse}td,th{padding:8px 6px;border-top:1px s
 .chip{grid-row:4;z-index:2;margin:0 4px;padding:2px 5px;border-radius:6px;background:var(--chip);color:var(--chip-ink);cursor:grab;font-size:12px;font-weight:600;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;border:1px solid var(--accent)}
 .chip.awaiting_approval{background:var(--pending);color:var(--pending-ink);border-color:var(--pending-ink)}
 body.dragging .bar,body.dragging .chip{pointer-events:none}
+.monthnav{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 10px}.monthtitle{text-align:center;flex:1;min-width:0}.monthtitle h2{margin:0;font-size:22px}.monthtitle span{font-size:12px}.btn.ghost{background:none;color:var(--accent);border:1px solid var(--line);white-space:nowrap}.btn.ghost:hover{background:var(--win)}
 .legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted);margin:0 0 6px;align-items:center}.legend b{color:var(--ink)}.legend span{display:flex;align-items:center;gap:6px}.legend i{display:inline-block;width:22px;height:12px;padding:0;margin:0;line-height:0}
 @media (max-width:640px){.cal-help{font-size:13px}.bar{font-size:10px;padding:0 3px}.chip{font-size:10px;margin:0 1px;padding:2px 2px}.day{margin:0 1px;padding:1px 3px}.hide-sm{display:none}}
 .scroll{overflow-x:auto}
@@ -154,7 +155,7 @@ function calendar(month, cleanings, bookings, tz, config, extras = { counts: {},
       const staying = bookings.some(b => b.check_in < d && d < b.check_out);
       const turnover = bookings.some(b => b.check_out === d) && bookings.some(b => b.check_in === d);
       const booked = live.filter(c => c.date === d).length;
-      html += `<div class="day ${d.slice(0, 7) !== month ? 'out' : ''} ${d === today ? 'today' : ''}" data-date="${d}" data-label="${h(prettyDate(d))}"${staying ? ' data-staying="1"' : ''}${turnover ? ' data-turnover="1"' : ''}${booked ? ` data-booked="${booked}"` : ''}${d < today ? ' data-past="1"' : ''} style="grid-column:${2 * i + 1}/span 2" role="button" tabindex="0" aria-label="Add a cleaning on ${h(prettyDate(d))}"><b>${Number(d.slice(8))}</b></div>`;
+      html += `<div class="day ${d.slice(0, 7) !== month ? 'out' : ''} ${d === today ? 'today' : ''}" data-date="${d}" data-label="${h(prettyDate(d))}"${staying ? ' data-staying="1"' : ''}${turnover ? ' data-turnover="1"' : ''}${booked ? ` data-booked="${booked}"` : ''}${d < today ? ' data-past="1"' : ''} style="grid-column:${2 * i + 1}/span 2" role="button" tabindex="0" aria-label="Add a cleaning on ${h(prettyDate(d))}"><b>${d.slice(8) === '01' || (d.slice(0, 7) !== month && d === ws) ? `${new Date(d + 'T12:00:00Z').toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short' })} ` : ''}${Number(d.slice(8))}</b></div>`;
     }
     for (const b of bookings) {
       if (b.check_out < ws || b.check_in > we) continue;
@@ -188,8 +189,13 @@ function calendar(month, cleanings, bookings, tz, config, extras = { counts: {},
     weeks.push(`<div class="week">${html}</div>`);
   }
 
-  return `<div class="row" style="justify-content:space-between"><h2>${label}</h2><div class="row">
-<a class="btn" href="/?month=${prev}">&lsaquo;</a><a class="btn" href="/?month=${next}">&rsaquo;</a></div></div>
+  const short = (ym) => new Date(ym + '-01T12:00:00Z').toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short' });
+  const thisMonth = today.slice(0, 7);
+  const rel = month === thisMonth ? 'This month' : month < thisMonth ? 'Past month' : 'Upcoming';
+  return `<div class="monthnav">
+<a class="btn ghost" href="/?month=${prev}" aria-label="Previous month">&lsaquo; ${short(prev)}</a>
+<div class="monthtitle"><h2>${label}</h2><span class="muted">${rel}${month !== thisMonth ? ` · <a href="/?month=${thisMonth}">Back to today</a>` : ''}</span></div>
+<a class="btn ghost" href="/?month=${next}" aria-label="Next month">${short(next)} &rsaquo;</a></div>
 <div class="legend"><b>Stays:</b><span><i class="bar stay-bar ready"></i>Cleaning set before check-in</span><span><i class="bar stay-bar pending"></i>Cleaning waiting for approval</span><span><i class="bar stay-bar missing"></i>No cleaning before check-in</span><span><i class="bar stay-bar past"></i>Past</span><span><i class="bar stay-bar ready personal"></i>⌂ Personal stay</span></div>
 <div class="legend"><b>Cleanings:</b><span><i class="chip approved"></i>Confirmed (✎ = notes)</span><span><i class="chip awaiting_approval"></i>Needs approval</span><span>⚠ Something to raise with Airbnb</span></div>
 <div class="dows">${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => `<div>${d}</div>`).join('')}</div>
@@ -223,6 +229,7 @@ d.addEventListener('dragleave',()=>d.classList.remove('over'));
 d.addEventListener('drop',async e=>{e.preventDefault();d.classList.remove('over');const id=e.dataTransfer.getData('text/plain')||dragId;if(!id)return;
 const r=await fetch('/cleanings/'+id+'/move',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','Accept':'application/json'},body:'date='+d.dataset.date});
 const j=await r.json();location.href=j.redirect||'/?month=${month}'})});
+{let sx=null,sy=0;const cal=document.getElementById('cal');cal.addEventListener('touchstart',e=>{sx=e.touches[0].clientX;sy=e.touches[0].clientY},{passive:true});cal.addEventListener('touchend',e=>{if(sx===null)return;const dx=e.changedTouches[0].clientX-sx,dy=e.changedTouches[0].clientY-sy;sx=null;if(Math.abs(dx)>70&&Math.abs(dx)>2*Math.abs(dy))location.href='/?month='+(dx<0?'${next}':'${prev}')})}
 </script>`;
 }
 
