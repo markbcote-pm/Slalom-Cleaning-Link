@@ -28,7 +28,8 @@ export function loadConfig(overrides = {}) {
     dataDir: e.DATA_DIR || './data',
     dbFile: e.DB_FILE || null,
     timezone: e.TIMEZONE || 'America/Los_Angeles',
-    propertyName: e.PROPERTY_NAME || 'the rental',
+    // 'the rental' was the old placeholder; the address is what goes in texts to the cleaner.
+    propertyName: (e.PROPERTY_NAME && e.PROPERTY_NAME !== 'the rental') ? e.PROPERTY_NAME : '2072 Slalom Ct',
     airbnbIcalUrl: e.AIRBNB_ICAL_URL || '',
     syncMinutes: Number(e.SYNC_MINUTES || 30),
     checkoutTime: e.CHECKOUT_TIME || '11:00',

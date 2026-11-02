@@ -32,10 +32,20 @@ export function createService({ db, config, notifier }) {
     return next ? `Next guests arrive ${prettyDate(next.check_in)}.` : 'No guests booked right after.';
   }
 
-  function describe(c) {
+  // "<date>. Guest checks out at 11 AM. Next guests arrive <date>." plus any note.
+  function dayDetails(c) {
     const isCheckout = db.prepare("SELECT 1 FROM bookings WHERE status='active' AND check_out = ?").get(c.date);
-    const checkout = isCheckout ? `Guest checks out ${prettyTime(config.checkoutTime)}. ` : '';
-    return `${prettyDate(c.date)} at ${config.propertyName}. ${checkout}${turnoverNote(c.date)}${c.note ? ` Note: ${c.note}` : ''}`;
+    const checkout = isCheckout ? `Guest checks out at ${prettyTime(config.checkoutTime)}. ` : '';
+    return `${prettyDate(c.date)}. ${checkout}${turnoverNote(c.date)}${c.note ? ` Note: ${c.note}` : ''}`;
+  }
+
+  function describe(c) {
+    return dayDetails(c).replace(/^([^.]*)\./, `$1 at ${config.propertyName}.`);
+  }
+
+  // The group text for a new cleaning (Mark's wording, 2026-11-02).
+  function requestText(c) {
+    return `New cleaning request for ${config.propertyName}: ${dayDetails(c)}`;
   }
 
   // ---- Approval of a new cleaning ------------------------------------------------
@@ -50,7 +60,7 @@ export function createService({ db, config, notifier }) {
   }
 
   function confirmText(c) {
-    return `CLEANING CONFIRMED: ${describe(c)}`;
+    return requestText(c);
   }
 
   async function approve(approvalToken, by) {
@@ -238,7 +248,7 @@ export function createService({ db, config, notifier }) {
       logEvent(c.id, 'Cleaner texted', `Arranged directly with ${config.cleaner?.name || 'the cleaner'}, no text sent`);
       return { cleaning: c, replaced, conflict };
     }
-    const msg = await askAboutGroupMessage(c, 'added', `CLEANING ADDED: ${describe(c)}`);
+    const msg = await askAboutGroupMessage(c, 'added', requestText(c));
     return { cleaning: c, message: msg, replaced, conflict };
   }
 
