@@ -178,9 +178,14 @@ test('HTTP: dashboard needs password, feed needs token, approval page works, dra
     const dash = await fetch(base + '/?month=2026-11', { headers: auth });
     assert.equal(dash.status, 200);
     const html = await dash.text();
-    assert.match(html, /Waiting on you/);
-    assert.match(html, /class="bar stay-bar cont-r" style="grid-column:10\/15"[^>]*>Guest ···1234</, 'Thu 5th 1 PM to Sun 8th 11 AM spans weeks: first week from Thu afternoon');
-    assert.match(html, /class="bar stay-bar cont-l" style="grid-column:1\/2"/, 'continues into Sunday morning');
+    assert.match(html, /1 thing waiting on you/);
+    for (const page of ['/inbox', '/stays', '/payments', '/more', '/todos', '/notes']) {
+      const r = await fetch(base + page, { headers: auth });
+      assert.equal(r.status, 200, page);
+    }
+    assert.match(await (await fetch(base + '/inbox', { headers: auth })).text(), /Needs approval/);
+    assert.match(html, /class="bar stay-bar ready cont-r" style="grid-column:10\/15"[^>]*>Guest ···1234</, 'Thu 5th 1 PM to Sun 8th 11 AM spans weeks: first week from Thu afternoon');
+    assert.match(html, /class="bar stay-bar ready cont-l" style="grid-column:1\/2"/, 'continues into Sunday morning');
     assert.match(html, /class="chip awaiting_approval" draggable="true" data-id="\d+" style="grid-column:1\/span 2"/);
     assert.match(html, /Open, no next booking yet/);
 
@@ -239,7 +244,7 @@ test('cleaning windows between stays', () => {
     { check_in: '2026-11-01', check_out: '2026-11-05' },
     { check_in: '2026-11-05', check_out: '2026-11-08' },
   ]);
-  assert.deepEqual(w, [
+  assert.deepEqual(w.map(({ from, to, days }) => ({ from, to, days })), [
     { from: '2026-11-05', to: '2026-11-05', days: 1 },  // same-day turnover
     { from: '2026-11-08', to: '2026-11-10', days: 3 },  // Sun 11 AM to Tue 1 PM: Sun, Mon, Tue
     { from: '2026-11-12', to: null, days: null },
@@ -357,4 +362,21 @@ test('hand-scheduled cleanings: no text when already arranged, and Airbnb sync d
   const mv = await app.service.move(cleaning.id, '2026-11-10', 'Mark');
   assert.ok(mv.message);
   assert.match(mv.message.body, /was Mon, Nov 9, now Tue, Nov 10/);
+});
+
+import { stayReadiness } from '../src/views.js';
+test('stay colors: ready, pending, missing, past', () => {
+  const bookings = [
+    { uid: 'old', check_in: '2026-10-20', check_out: '2026-10-25' },
+    { uid: 'a', check_in: '2026-11-03', check_out: '2026-11-06' },
+    { uid: 'b', check_in: '2026-11-08', check_out: '2026-11-10' },   // gap Nov 6-8
+    { uid: 'c', check_in: '2026-11-10', check_out: '2026-11-12' },   // same-day after b
+    { uid: 'd', check_in: '2026-11-15', check_out: '2026-11-18' },   // gap Nov 12-15
+  ];
+  const cleanings = [
+    { date: '2026-11-07', status: 'approved' },          // covers b
+    { date: '2026-11-10', status: 'awaiting_approval' },  // proposed for c
+    { date: '2026-11-13', status: 'cancelled' },          // doesn't count for d
+  ];
+  assert.deepEqual(stayReadiness(bookings, cleanings, '2026-11-02'), { old: 'past', a: 'missing', b: 'ready', c: 'pending', d: 'missing' });
 });

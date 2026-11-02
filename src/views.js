@@ -4,12 +4,12 @@ export const h = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;'
 const money = (cents) => `$${((cents || 0) / 100).toFixed(2)}`;
 
 const CSS = `
-:root{--bg:#f7f6f3;--card:#fff;--ink:#1d1d1b;--muted:#6b6a66;--line:#e4e2dc;--accent:#2f6f5e;--accent-ink:#fff;--warn:#a5551b;--chip:#e3f0ec;--chip-ink:#1f4f42;--pending:#fbefd9;--pending-ink:#7a4a10;--stay:#3d5a80;--stay-ink:#fff;--win:#eef6f2;--win-ink:#2f6f5e;--win-line:#8fbfae;--tight:#b3412e;--tight-ring:#ffb199}
-@media (prefers-color-scheme:dark){:root{--bg:#141413;--card:#1e1e1c;--ink:#ecebe6;--muted:#a3a19a;--line:#33322f;--accent:#5fb39a;--accent-ink:#0f1f1a;--warn:#e19a62;--chip:#1f3a32;--chip-ink:#bfe6d9;--pending:#3a2c16;--pending-ink:#f2cf96;--stay:#5b7db0;--stay-ink:#fff;--win:#17302a;--win-ink:#9fd6c3;--win-line:#3f7a69;--tight:#d0604b;--tight-ring:#ffb199}}
+:root{--bg:#f7f6f3;--card:#fff;--ink:#1d1d1b;--muted:#6b6a66;--line:#e4e2dc;--accent:#2f6f5e;--accent-ink:#fff;--warn:#a5551b;--chip:#e3f0ec;--chip-ink:#1f4f42;--pending:#fbefd9;--pending-ink:#7a4a10;--stay:#3d5a80;--stay-ink:#fff;--win:#eef6f2;--win-ink:#2f6f5e;--win-line:#8fbfae;--tight:#b3412e;--tight-ring:#ffb199;--s-pending:#a16207;--s-missing:#d9480f;--s-past:#8a939e;--w-missing:#fff0e6;--w-missing-ink:#a8360a}
+@media (prefers-color-scheme:dark){:root{--bg:#141413;--card:#1e1e1c;--ink:#ecebe6;--muted:#a3a19a;--line:#33322f;--accent:#5fb39a;--accent-ink:#0f1f1a;--warn:#e19a62;--chip:#1f3a32;--chip-ink:#bfe6d9;--pending:#3a2c16;--pending-ink:#f2cf96;--stay:#5b7db0;--stay-ink:#fff;--win:#17302a;--win-ink:#9fd6c3;--win-line:#3f7a69;--tight:#d0604b;--tight-ring:#ffb199;--s-pending:#b7791f;--s-missing:#e8590c;--s-past:#4b5563;--w-missing:#3b1d0e;--w-missing-ink:#ffb48a}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,Segoe UI,sans-serif}
 main{max-width:980px;margin:0 auto;padding:16px}h1{font-size:22px;margin:8px 0 4px}h2{font-size:17px;margin:0 0 10px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin:14px 0}
-.muted{color:var(--muted)}.warn{color:var(--tight)}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.muted{color:var(--muted)}.warn{color:var(--tight)}.missing-text{color:var(--s-missing);font-weight:600}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 button,.btn{background:var(--accent);color:var(--accent-ink);border:0;border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer;text-decoration:none;display:inline-block}
 button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}button.danger{background:transparent;color:var(--warn);border:1px solid var(--line)}
 input,textarea,select{font:inherit;padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}textarea{width:100%;min-height:130px}
@@ -21,16 +21,23 @@ table{width:100%;border-collapse:collapse}td,th{padding:8px 6px;border-top:1px s
 .week{display:grid;grid-template-columns:repeat(14,minmax(0,1fr));grid-template-rows:22px 24px 24px 26px;column-gap:0;row-gap:3px;position:relative}
 .day{cursor:pointer;grid-row:1/-1;min-width:0;border:1px solid var(--line);border-radius:8px;padding:2px 5px;font-size:12px;margin:0 2px}.day.out{opacity:.45}.day:hover{background:var(--win)}.day[data-past]{cursor:default}.day[data-past]:hover{background:none}.day.today{border-color:var(--accent);border-width:2px}.day.over{outline:2px dashed var(--accent)}
 .bar{pointer-events:none;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:12px;line-height:22px;padding:0 6px;border-radius:11px;z-index:1}
-.stay-bar{grid-row:2;background:var(--stay);color:var(--stay-ink);font-weight:600}.stay-bar.flagged{box-shadow:inset 0 0 0 2px var(--tight-ring)}.stay-bar.cont-l{border-top-left-radius:0;border-bottom-left-radius:0}.stay-bar.cont-r{border-top-right-radius:0;border-bottom-right-radius:0}
+.stay-bar{grid-row:2;background:var(--stay);color:#fff;font-weight:600}.stay-bar.pending{background:var(--s-pending)}.stay-bar.missing{background:var(--s-missing)}.stay-bar.past{background:var(--s-past)}.stay-bar.flagged{box-shadow:inset 0 0 0 2px #ffd43b}.stay-bar.cont-l{border-top-left-radius:0;border-bottom-left-radius:0}.stay-bar.cont-r{border-top-right-radius:0;border-bottom-right-radius:0}
 .win-bar{grid-row:3;background:var(--win);color:var(--win-ink);border:1px dashed var(--win-line);line-height:20px;font-size:11px}
-.win-bar.short{background:var(--pending);color:var(--pending-ink);border-color:var(--pending-ink)}.win-bar.tight{background:var(--tight);color:#fff;border:0;margin:0 4px;text-align:center;font-weight:600}
+.win-bar.open,.win-bar.past{background:transparent;color:var(--muted);border-color:var(--line)}
+.win-bar.pending{background:var(--pending);color:var(--pending-ink);border-color:var(--s-pending)}
+.win-bar.missing{background:var(--w-missing);color:var(--w-missing-ink);border:1px solid var(--s-missing);font-weight:600}
+.win-bar.tight{color:#fff;border:0;margin:0 4px;text-align:center;font-weight:600;background:var(--accent)}.win-bar.tight.pending{background:var(--s-pending)}.win-bar.tight.missing{background:var(--s-missing)}
 .chip{grid-row:4;z-index:2;margin:0 4px;padding:2px 5px;border-radius:6px;background:var(--chip);color:var(--chip-ink);cursor:grab;font-size:12px;font-weight:600;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;border:1px solid var(--accent)}
 .chip.awaiting_approval{background:var(--pending);color:var(--pending-ink);border-color:var(--pending-ink)}
 body.dragging .bar,body.dragging .chip{pointer-events:none}
-.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted);margin:0 0 10px}.legend span{display:flex;align-items:center;gap:6px}.legend i{display:inline-block;width:22px;height:12px;padding:0;margin:0;line-height:0}
-@media (max-width:640px){.bar{font-size:10px;padding:0 3px}.chip{font-size:10px;margin:0 1px;padding:2px 2px}.day{margin:0 1px;padding:1px 3px}.hide-sm{display:none}}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted);margin:0 0 6px;align-items:center}.legend b{color:var(--ink)}.legend span{display:flex;align-items:center;gap:6px}.legend i{display:inline-block;width:22px;height:12px;padding:0;margin:0;line-height:0}
+@media (max-width:640px){.cal-help{font-size:13px}.bar{font-size:10px;padding:0 3px}.chip{font-size:10px;margin:0 1px;padding:2px 2px}.day{margin:0 1px;padding:1px 3px}.hide-sm{display:none}}
 .scroll{overflow-x:auto}
-.tabs{display:flex;gap:4px;margin:12px 0 0;border-bottom:1px solid var(--line)}.tab{padding:8px 14px;color:var(--muted);text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px}.tab.on{color:var(--ink);border-color:var(--accent);font-weight:600}
+.topbar{display:flex;justify-content:space-between;align-items:center;gap:8px}.topbar h1{display:inline;margin:0 8px 0 0}.test-badge{font-size:12px;padding:2px 8px;border-radius:99px;background:var(--pending);color:var(--pending-ink);vertical-align:middle}
+.toolbar{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:10px;font-size:13px}button.small{padding:5px 10px;font-size:13px}
+.flash{margin-top:10px;padding:8px 12px;border-radius:8px;background:var(--chip);color:var(--chip-ink);font-size:14px}.alerts{display:flex;flex-wrap:wrap;gap:4px 16px;margin-top:8px;font-size:14px}
+.card:has(#cal){margin-top:10px}
+.tabs{display:flex;gap:2px;margin:10px 0 0;border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:none;white-space:nowrap}.tab{padding:8px 12px;white-space:nowrap;color:var(--muted);text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px}.tab.on{color:var(--ink);border-color:var(--accent);font-weight:600}
 .count{background:var(--tight);color:#fff;border-radius:99px;padding:0 7px;font-size:12px}
 .notes,.todos{list-style:none;margin:0;padding:0}.note{border-top:1px solid var(--line);padding:10px 0}.note-body{margin:4px 0;white-space:pre-wrap}
 .tag{font-size:12px;padding:2px 8px;border-radius:99px}.tag.supplies{background:var(--pending);color:var(--pending-ink)}.tag.condition{background:var(--tight);color:#fff}
@@ -90,9 +97,31 @@ export function cleaningWindows(bookings) {
   const sorted = [...bookings].sort((a, b) => a.check_in.localeCompare(b.check_in));
   return sorted.map((b, i) => {
     const next = sorted.slice(i + 1).find(n => n.check_in >= b.check_out) || null;
-    return { from: b.check_out, to: next ? next.check_in : null, days: next ? daysBetween(b.check_out, next.check_in) + 1 : null };
+    return { from: b.check_out, to: next ? next.check_in : null, days: next ? daysBetween(b.check_out, next.check_in) + 1 : null, nextUid: next ? next.uid : null };
   });
 }
+
+// Is the house going to be cleaned before these guests arrive?
+//   ready   - a confirmed cleaning sits between the previous checkout and this check-in
+//   pending - a cleaning is proposed but still waiting for approval
+//   missing - nothing scheduled in that gap
+//   past    - the stay is over (shown greyed out)
+// Stays that have already started, or have no stay before them, count as ready.
+export function stayReadiness(bookings, cleanings, today) {
+  const live = cleanings.filter(c => !['cancelled', 'declined'].includes(c.status));
+  const out = {};
+  for (const b of bookings) {
+    if (b.check_out < today) { out[b.uid] = 'past'; continue; }
+    if (b.check_in < today) { out[b.uid] = 'ready'; continue; }
+    const prev = bookings.filter(p => p.uid !== b.uid && p.check_out <= b.check_in).sort((x, y) => y.check_out.localeCompare(x.check_out))[0];
+    if (!prev) { out[b.uid] = 'ready'; continue; }
+    const inGap = live.filter(c => c.date >= prev.check_out && c.date <= b.check_in);
+    out[b.uid] = inGap.some(c => c.status !== 'awaiting_approval') ? 'ready' : inGap.length ? 'pending' : 'missing';
+  }
+  return out;
+}
+
+const READINESS_NOTE = { ready: 'Cleaning scheduled before check-in', pending: 'Cleaning proposed, waiting for approval', missing: 'No cleaning scheduled before check-in', past: 'Past stay' };
 
 function calendar(month, cleanings, bookings, tz, config, extras = { counts: {}, flagged: new Set() }) {
   const [y, m] = month.split('-').map(Number);
@@ -104,6 +133,7 @@ function calendar(month, cleanings, bookings, tz, config, extras = { counts: {},
   const label = new Date(first + 'T12:00:00Z').toLocaleDateString('en-US', { timeZone: 'UTC', month: 'long', year: 'numeric' });
   const windows = cleaningWindows(bookings);
   const live = cleanings.filter(c => !['cancelled', 'declined'].includes(c.status));
+  const ready = stayReadiness(bookings, cleanings, today);
   const weeks = [];
 
   // Each week is a 14-column grid (two half-days per day), so a stay can start at the
@@ -130,7 +160,8 @@ function calendar(month, cleanings, bookings, tz, config, extras = { counts: {},
       const cut = `${b.check_in < ws ? ' cont-l' : ''}${b.check_out > we ? ' cont-r' : ''}`;
       const nights = daysBetween(b.check_in, b.check_out);
       const flag = extras.flagged.has(b.uid);
-      html += `<div class="bar stay-bar${cut}${flag ? ' flagged' : ''}" style="grid-column:${s}/${e}" title="${h(guestLabel(b))}: ${h(prettyDate(b.check_in))} to ${h(prettyDate(b.check_out))}, ${nights} night${nights === 1 ? '' : 's'}${flag ? '. Has notes to raise with Airbnb' : ''}">${flag ? '⚠ ' : ''}${h(guestLabel(b))}</div>`;
+      const st = ready[b.uid] || 'ready';
+      html += `<div class="bar stay-bar ${st}${cut}${flag ? ' flagged' : ''}" style="grid-column:${s}/${e}" title="${h(guestLabel(b))}: ${h(prettyDate(b.check_in))} to ${h(prettyDate(b.check_out))}, ${nights} night${nights === 1 ? '' : 's'}. ${READINESS_NOTE[st]}${flag ? '. Has notes to raise with Airbnb' : ''}">${flag ? '⚠ ' : ''}${st === 'missing' ? '! ' : ''}${h(guestLabel(b))}</div>`;
     }
     for (const win of windows) {
       const end = win.to || addDays(we, 1);
@@ -139,9 +170,12 @@ function calendar(month, cleanings, bookings, tz, config, extras = { counts: {},
       const sameDay = win.to && win.to === win.from;
       if (sameDay) { s = mid(win.from) - 1; e = s + 2; }
       if (e <= s) continue;
-      const text = sameDay ? `Same-day turnover: ${prettyTime(config.checkoutTime)} to ${prettyTime(config.checkinTime)}` : win.to ? `${win.days} days to clean` : 'Open, no next booking yet';
+      const st = win.nextUid ? (ready[win.nextUid] || 'ready') : 'open';
+      const status = { ready: 'cleaning set', pending: 'needs OK', missing: 'no cleaning yet', past: '' }[st] || '';
+      const text = sameDay ? `Same-day turnover: ${prettyTime(config.checkoutTime)} to ${prettyTime(config.checkinTime)}${status ? `, ${status}` : ''}`
+        : win.to ? `${win.days} days to clean${status ? ` · ${status}` : ''}` : 'Open, no next booking yet';
       const showText = win.from >= ws || ws === gridStart; // label once, where the window starts
-      html += `<div class="bar win-bar${sameDay ? ' tight' : win.to && win.days <= 2 ? ' short' : ''}" style="grid-column:${s}/${e}" title="${h(text)}">${sameDay ? 'Same day' : showText ? h(text) : ''}</div>`;
+      html += `<div class="bar win-bar ${st}${sameDay ? ' tight' : ''}" style="grid-column:${s}/${e}" title="${h(text)}">${sameDay ? 'Same day' : showText ? h(text) : ''}</div>`;
     }
     for (const c of live) {
       const i = idx(c.date);
@@ -153,10 +187,11 @@ function calendar(month, cleanings, bookings, tz, config, extras = { counts: {},
 
   return `<div class="row" style="justify-content:space-between"><h2>${label}</h2><div class="row">
 <a class="btn" href="/?month=${prev}">&lsaquo;</a><a class="btn" href="/?month=${next}">&rsaquo;</a></div></div>
-<div class="legend"><span><i class="bar stay-bar"></i>Guests staying</span><span><i class="bar win-bar"></i>Open days to clean</span><span><i class="bar win-bar tight"></i>Same-day turnover</span><span><i class="chip approved"></i>Cleaning (✎ = notes)</span><span>⚠ Something to raise with Airbnb</span><span><i class="chip awaiting_approval"></i>Needs approval</span></div>
+<div class="legend"><b>Stays:</b><span><i class="bar stay-bar ready"></i>Cleaning set before check-in</span><span><i class="bar stay-bar pending"></i>Cleaning waiting for approval</span><span><i class="bar stay-bar missing"></i>No cleaning before check-in</span><span><i class="bar stay-bar past"></i>Past</span></div>
+<div class="legend"><b>Cleanings:</b><span><i class="chip approved"></i>Confirmed (✎ = notes)</span><span><i class="chip awaiting_approval"></i>Needs approval</span><span>⚠ Something to raise with Airbnb</span></div>
 <div class="dows">${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => `<div>${d}</div>`).join('')}</div>
 <div class="cal" id="cal">${weeks.join('')}</div>
-<p class="muted">Stays run from ${prettyTime(config.checkinTime)} check-in to ${prettyTime(config.checkoutTime)} checkout. Tap a day to add a cleaning. Tap a cleaning to open it, or drag it to another day to move it. You'll be asked before anything is texted to the group.</p>
+<p class="muted cal-help">Stays run from ${prettyTime(config.checkinTime)} check-in to ${prettyTime(config.checkoutTime)} checkout. Tap a day to add a cleaning. Tap a cleaning to open it, or drag it to another day to move it. You'll be asked before anything is texted to the group.</p>
 <dialog id="add-dialog"><form method="post" action="/cleanings">
 <h2 id="add-title">Add a cleaning</h2><input type="hidden" name="date" id="add-date">
 <p id="add-warn" class="warn" hidden></p>
@@ -192,11 +227,13 @@ export function header({ config, db, who, active }) {
   const whoSel = config.approvers.map(a => `<option ${a.name === who ? 'selected' : ''}>${h(a.name)}</option>`).join('');
   const openTodos = db.prepare("SELECT COUNT(*) n FROM todos WHERE status='open'").get().n
     + db.prepare("SELECT COUNT(*) n FROM notes WHERE followup='open'").get().n;
+  const waiting = db.prepare("SELECT COUNT(*) n FROM group_messages WHERE status='pending'").get().n
+    + db.prepare("SELECT COUNT(*) n FROM cleanings WHERE status='awaiting_approval'").get().n;
+  const badge = (n) => n ? ` <span class="count">${n}</span>` : '';
   const tab = (key, href, label) => `<a class="tab ${active === key ? 'on' : ''}" href="${href}">${label}</a>`;
-  return `<div class="row" style="justify-content:space-between"><div><h1>Cleaning Link</h1>
-<div class="muted">${h(config.propertyName)}${config.dryRun ? ' · <b>Test mode: no texts are really sent</b>' : ''}</div></div>
-<form method="post" action="/who" class="row"><label class="muted">You are</label><select name="name" onchange="this.form.submit()">${whoSel}</select></form></div>
-<nav class="tabs">${tab('calendar', '/', 'Calendar')}${tab('todos', '/todos', `To-do${openTodos ? ` <span class="count">${openTodos}</span>` : ''}`)}${tab('notes', '/notes', 'Notes')}</nav>`;
+  return `<div class="topbar"><div><h1>Cleaning Link</h1>${config.dryRun ? '<span class="test-badge">Test mode</span>' : ''}</div>
+<form method="post" action="/who" class="row"><label class="muted hide-sm">You are</label><select name="name" onchange="this.form.submit()" aria-label="You are">${whoSel}</select></form></div>
+<nav class="tabs">${tab('calendar', '/', 'Calendar')}${tab('inbox', '/inbox', `Waiting on you${badge(waiting)}`)}${tab('stays', '/stays', 'Stays')}${tab('todos', '/todos', `To-do${badge(openTodos)}`)}${tab('notes', '/notes', 'Notes')}${tab('payments', '/payments', 'Payments')}${tab('more', '/more', 'More')}</nav>`;
 }
 
 const TAG_LABEL = { supplies: 'Supplies', condition: 'Condition / damage' };
@@ -289,7 +326,9 @@ function staysCard(bookings, today, config, cleanings = []) {
     const nights = daysBetween(b.check_in, b.check_out);
     const gap = !w.to ? 'No next booking yet' : w.to === w.from ? '<b class="warn">Same day</b>' : `${w.days} days (${h(prettyDate(w.from))} to ${h(prettyDate(w.to))})`;
     const covering = live.find(c => c.date >= w.from && (!w.to || c.date <= w.to));
-    const plan = covering
+    const plan = !covering && w.to && w.to >= today
+      ? '<div class="missing-text">No cleaning scheduled</div>'
+      : covering
       ? `<div><a href="/cleanings/${covering.id}">${covering.status === 'awaiting_approval' ? 'Proposed' : 'Cleaning'} ${h(prettyDate(covering.date))}</a>${covering.status === 'awaiting_approval' ? ' <span class="muted">(waiting for approval)</span>' : ' ✓'}</div>`
       : '';
     const form = !covering || covering.status === 'awaiting_approval'
@@ -305,55 +344,90 @@ function staysCard(bookings, today, config, cleanings = []) {
 ${rows ? `<div class="scroll"><table><tr><th>Guest</th><th>Stay</th><th>Time to clean after</th></tr>${rows}</table></div>` : '<p class="muted">No upcoming stays.</p>'}</div>`;
 }
 
-export function dashboard({ config, service, db, month, who, flash }) {
-  const cleanings = service.list({ from: addDays(`${month}-01`, -60) });
-  const bookings = db.prepare("SELECT * FROM bookings WHERE status='active'").all();
+function pageData({ config, service, db, month }) {
   const today = todayIn(config.timezone);
-  const lastSync = JSON.parse(db.prepare("SELECT value FROM meta WHERE key='last_sync'").get()?.value || 'null');
+  return {
+    today,
+    cleanings: service.list({ from: addDays(`${month || today.slice(0, 7)}-01`, -60) }),
+    bookings: db.prepare("SELECT * FROM bookings WHERE status='active'").all(),
+  };
+}
+
+function decisionsList({ db, service, who }) {
   const pendingMsgs = db.prepare("SELECT g.*, c.date FROM group_messages g JOIN cleanings c ON c.id = g.cleaning_id WHERE g.status='pending' ORDER BY g.created_at").all();
   const awaiting = db.prepare("SELECT * FROM cleanings WHERE status='awaiting_approval' ORDER BY date").all();
-  const owed = db.prepare("SELECT * FROM cleanings WHERE status='completed' AND amount_cents IS NOT NULL ORDER BY date").all();
-  const awaitingBill = db.prepare("SELECT * FROM cleanings WHERE status='completed' AND amount_cents IS NULL ORDER BY date").all();
-  const cleanerName = h(config.cleaner?.name || 'the cleaner');
-  const paidYear = db.prepare("SELECT COALESCE(SUM(amount_cents),0) s, COUNT(*) n FROM cleanings WHERE status='paid' AND substr(paid_at,1,4)=?").get(today.slice(0, 4));
-  const outbox = db.prepare('SELECT * FROM outbox ORDER BY id DESC LIMIT 15').all();
-
-  const decisions = [
+  return [
     ...pendingMsgs.map(m => `<tr><td>${h(prettyDate(m.date))}</td><td><span class="pill">Text the group?</span> ${h(m.body)}</td><td><a class="btn" href="/g/${m.token}?by=${encodeURIComponent(who)}">Decide</a></td></tr>`),
     ...awaiting.map(c => `<tr><td>${h(prettyDate(c.date))}</td><td><span class="pill">Needs approval</span> ${h(service.describe(c))}</td><td><a class="btn" href="/a/${c.approval_token}?by=${encodeURIComponent(who)}">Review</a></td></tr>`),
-  ].join('');
+  ];
+}
 
+// Home: just the calendar, with one line for anything that needs attention.
+export function dashboard({ config, service, db, month, who, flash }) {
+  const { today, cleanings, bookings } = pageData({ config, service, db, month });
+  const lastSync = JSON.parse(db.prepare("SELECT value FROM meta WHERE key='last_sync'").get()?.value || 'null');
+  const waiting = decisionsList({ db, service, who }).length;
+  const missing = Object.entries(stayReadiness(bookings, cleanings, today)).filter(([, v]) => v === 'missing').length;
+  const alerts = [
+    waiting ? `<a href="/inbox">${waiting} thing${waiting === 1 ? '' : 's'} waiting on you &rsaquo;</a>` : '',
+    missing ? `<a href="/stays" class="missing-text">${missing} upcoming stay${missing === 1 ? ' has' : 's have'} no cleaning before check-in &rsaquo;</a>` : '',
+  ].filter(Boolean);
+  return layout('Cleaning Link', `${header({ config, db, who, active: 'calendar' })}
+<div class="toolbar"><span class="muted">${lastSync ? `Airbnb checked ${h(new Date(lastSync.at).toLocaleString('en-US', { timeZone: config.timezone, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }))}` : 'Airbnb not checked yet'}</span>
+<form method="post" action="/sync"><button class="ghost small">Check Airbnb now</button></form></div>
+${flash ? `<div class="flash">${h(flash)}</div>` : ''}
+${alerts.length ? `<div class="alerts">${alerts.join('')}</div>` : ''}
+<div class="card">${calendar(month, cleanings, bookings, config.timezone, config, calendarExtras(db))}</div>`);
+}
+
+export function inboxPage({ config, service, db, who }) {
+  const { today, cleanings } = pageData({ config, service, db });
+  const decisions = decisionsList({ db, service, who }).join('');
   const upcoming = cleanings.filter(c => c.date >= today && !['cancelled', 'declined'].includes(c.status));
   const rows = upcoming.map(c => `<tr><td><a href="/cleanings/${c.id}"><b>${h(prettyDate(c.date))}</b></a><div class="muted">${c.source === 'manual' ? 'Added by hand' : 'Airbnb'}${c.note ? ` · ${h(c.note)}` : ''}</div></td>
 <td><div class="stages">${service.stageOf(c).map(s => `<span class="stage ${s.done ? 'done' : ''}">${h(s.name)}</span>`).join('')}</div></td>
 <td><form method="post" action="/cleanings/${c.id}/move" class="row"><input type="date" name="date" value="${c.date}" required><button class="ghost">Move</button></form>
 <div class="row" style="margin-top:6px"><form method="post" action="/cleanings/${c.id}/cancel" onsubmit="return confirm('Cancel this cleaning?')"><button class="danger">Cancel</button></form>
 <form method="post" action="/cleanings/${c.id}/message"><input type="hidden" name="body" value=""><button class="ghost">Text group</button></form></div></td></tr>`).join('');
+  return layout('Waiting on you', `${header({ config, db, who, active: 'inbox' })}
+<div class="card"><h2>Waiting on you</h2>${decisions ? `<div class="scroll"><table>${decisions}</table></div>` : '<p class="muted">Nothing needs a decision right now.</p>'}</div>
+<div class="card"><h2>Upcoming cleanings</h2>${rows ? `<div class="scroll"><table><tr><th>Day</th><th>Progress</th><th>Change</th></tr>${rows}</table></div>` : '<p class="muted">Nothing scheduled.</p>'}</div>`);
+}
 
+export function staysPage({ config, service, db, who }) {
+  const { today, cleanings, bookings } = pageData({ config, service, db });
+  const cleaner = h(config.cleaner?.name || 'the cleaner');
+  return layout('Stays', `${header({ config, db, who, active: 'stays' })}
+${staysCard(bookings, today, config, cleanings)}
+<div class="card"><h2>Schedule a cleaning</h2><form method="post" action="/cleanings">
+<div class="row"><input type="date" name="date" required min="${today}"><input name="note" placeholder="Note (optional)" style="flex:1;min-width:180px"></div>
+<div class="row" style="margin-top:8px"><button name="arranged" value="1">Schedule, already arranged with ${cleaner}</button><button class="ghost" name="arranged" value="0">Schedule and text the group</button></div></form>
+<p class="muted">You can also tap a day on the calendar. A scheduled cleaning covers the turnover it falls in, so the app won't propose another one between those two stays.</p></div>`);
+}
+
+export function paymentsPage({ config, db, who }) {
+  const today = todayIn(config.timezone);
+  const owed = db.prepare("SELECT * FROM cleanings WHERE status='completed' AND amount_cents IS NOT NULL ORDER BY date").all();
+  const awaitingBill = db.prepare("SELECT * FROM cleanings WHERE status='completed' AND amount_cents IS NULL ORDER BY date").all();
+  const cleanerName = h(config.cleaner?.name || 'the cleaner');
+  const paidYear = db.prepare("SELECT COALESCE(SUM(amount_cents),0) s, COUNT(*) n FROM cleanings WHERE status='paid' AND substr(paid_at,1,4)=?").get(today.slice(0, 4));
   const owedRows = owed.map(c => `<tr><td><input type="checkbox" name="id" value="${c.id}" checked></td><td>${h(prettyDate(c.date))}</td><td>${money(c.amount_cents)}</td></tr>`).join('');
   const owedTotal = owed.reduce((s, c) => s + (c.amount_cents || 0), 0);
-  const recentPaid = db.prepare("SELECT * FROM cleanings WHERE status='paid' ORDER BY paid_at DESC LIMIT 8").all()
+  const recentPaid = db.prepare("SELECT * FROM cleanings WHERE status='paid' ORDER BY paid_at DESC LIMIT 12").all()
     .map(c => `<tr><td>${h(prettyDate(c.date))}</td><td>${money(c.amount_cents)}</td><td>${h(c.paid_method || '')}</td><td class="muted">${h(c.paid_at?.slice(0, 10))}</td></tr>`).join('');
-
-  return layout('Cleaning Link', `${header({ config, db, who, active: 'calendar' })}
-<div class="row" style="justify-content:space-between;margin-top:8px"><div class="muted">${lastSync ? `Airbnb checked ${h(new Date(lastSync.at).toLocaleString('en-US', { timeZone: config.timezone }))}` : 'Airbnb not checked yet'}</div>
-<form method="post" action="/sync"><button>Check Airbnb now</button></form></div>
-${flash ? `<div class="card">${h(flash)}</div>` : ''}
-${decisions ? `<div class="card"><h2>Waiting on you</h2><div class="scroll"><table>${decisions}</table></div></div>` : ''}
-<div class="card">${calendar(month, cleanings, bookings, config.timezone, config, calendarExtras(db))}</div>
-${staysCard(bookings, today, config, cleanings)}
-<div class="card" id="schedule"><h2>Schedule a cleaning</h2><form method="post" action="/cleanings">
-<div class="row"><input type="date" name="date" required min="${today}"><input name="note" placeholder="Note (optional)" style="flex:1;min-width:180px"></div>
-<div class="row" style="margin-top:8px"><button name="arranged" value="1">Schedule, already arranged with ${h(config.cleaner?.name || 'the cleaner')}</button><button class="ghost" name="arranged" value="0">Schedule and text the group</button></div></form>
-<p class="muted">Use the first button for days you've already agreed with ${h(config.cleaner?.name || 'the cleaner')}: nothing is texted. A scheduled cleaning covers the turnover it falls in, so the app won't propose another cleaning between those two stays.</p></div>
-<div class="card"><h2>Upcoming cleanings</h2>${rows ? `<div class="scroll"><table><tr><th>Day</th><th>Progress</th><th>Change</th></tr>${rows}</table></div>` : '<p class="muted">Nothing scheduled.</p>'}</div>
-<div class="card" id="payments"><h2>Cleaner payments</h2>
+  return layout('Payments', `${header({ config, db, who, active: 'payments' })}
+<div class="card"><h2>Cleaner payments</h2>
 <p>Owed now: <b>${money(owedTotal)}</b> for ${owed.length} cleaning(s) · Paid this year: ${money(paidYear.s)} (${paidYear.n})</p>
 ${awaitingBill.length ? `<h2 style="margin-top:14px">Cleaned, waiting for ${cleanerName}'s request</h2><p class="muted">When ${cleanerName} asks to be paid, enter the amount here.</p><table>
 ${awaitingBill.map(c => `<tr><td>${h(prettyDate(c.date))}</td><td><form method="post" action="/payments/request" class="row"><input type="hidden" name="id" value="${c.id}"><input name="amount" type="number" min="1" step="0.01" placeholder="Amount $" required style="width:120px"><button class="ghost">Save request</button></form></td></tr>`).join('')}</table>` : ''}
 ${owed.length ? `<h2 style="margin-top:14px">Requested, not paid yet</h2><form method="post" action="/payments/paid"><table><tr><th></th><th>Cleaning</th><th>Amount</th></tr>${owedRows}</table>
 <div class="row" style="margin-top:10px"><select name="method"><option>Venmo</option><option>Zelle</option><option>Cash</option><option>Check</option><option>Other</option></select><button>Mark selected paid</button></div></form>` : ''}
-${recentPaid ? `<h2 style="margin-top:14px">Recently paid</h2><table>${recentPaid}</table>` : ''}</div>
+${recentPaid ? `<h2 style="margin-top:14px">Recently paid</h2><table>${recentPaid}</table>` : ''}</div>`);
+}
+
+export function morePage({ config, db, who }) {
+  const outbox = db.prepare('SELECT * FROM outbox ORDER BY id DESC LIMIT 40').all();
+  return layout('More', `${header({ config, db, who, active: 'more' })}
 <div class="card"><h2>Calendar for Google, iCal and Skylight</h2><p>Subscribe to this address (Google Calendar: Other calendars, From URL):</p>
 <p><code>${h(config.baseUrl)}/feed/${h(config.feedToken)}.ics</code></p><p class="muted">Only approved cleanings appear. Google refreshes subscribed calendars every few hours.</p></div>
 <div class="card"><h2>Messages sent</h2><div class="scroll"><table><tr><th>When</th><th>To</th><th>Message</th><th>Status</th></tr>
