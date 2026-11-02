@@ -5,6 +5,7 @@ import { createApp } from '../src/server.js';
 import { parseIcal } from '../src/ical.js';
 import { localToUtc } from '../src/dates.js';
 import { cleaningFeed } from '../src/feed.js';
+import { cleaningWindows, guestLabel } from '../src/views.js';
 
 const NOW = new Date('2026-11-01T18:00:00Z');
 
@@ -178,7 +179,13 @@ test('HTTP: dashboard needs password, feed needs token, approval page works, dra
     assert.equal(dash.status, 200);
     const html = await dash.text();
     assert.match(html, /Waiting on you/);
-    assert.match(html, /data-date="2026-11-08"><b>8<\/b><span class="chip awaiting_approval"/);
+    assert.match(html, /class="bar stay-bar cont-r" style="grid-column:10\/15"[^>]*>Guest ···1234</, 'Thu 5th 1 PM to Sun 8th 11 AM spans weeks: first week from Thu afternoon');
+    assert.match(html, /class="bar stay-bar cont-l" style="grid-column:1\/2"/, 'continues into Sunday morning');
+    assert.match(html, /class="chip awaiting_approval" draggable="true" data-id="\d+" style="grid-column:1\/span 2"/);
+    assert.match(html, /Open, no next booking yet/);
+
+    await fetch(`${base}/bookings/name`, { method: 'POST', headers: auth, body: new URLSearchParams({ uid: 's1', name: 'Smith family' }), redirect: 'manual' });
+    assert.match(await (await fetch(base + '/?month=2026-11', { headers: auth })).text(), /stay-bar[^"]*" style="grid-column:10\/15"[^>]*>Smith family</);
 
     const c = app.db.prepare('SELECT * FROM cleanings').get();
     const page = await (await fetch(`${base}/a/${c.approval_token}?by=Danielle`)).text();
@@ -224,4 +231,89 @@ test('per-stay billing: cleaned -> Jenn requests amount -> paid', async () => {
   assert.equal(c.status, 'paid');
   assert.equal(c.amount_cents, 14550);
   app.stop();
+});
+
+test('cleaning windows between stays', () => {
+  const w = cleaningWindows([
+    { check_in: '2026-11-10', check_out: '2026-11-12' },
+    { check_in: '2026-11-01', check_out: '2026-11-05' },
+    { check_in: '2026-11-05', check_out: '2026-11-08' },
+  ]);
+  assert.deepEqual(w, [
+    { from: '2026-11-05', to: '2026-11-05', days: 1 },  // same-day turnover
+    { from: '2026-11-08', to: '2026-11-10', days: 3 },  // Sun 11 AM to Tue 1 PM: Sun, Mon, Tue
+    { from: '2026-11-12', to: null, days: null },
+  ]);
+  assert.equal(guestLabel({ description: 'Phone Number (Last 4 Digits): 9876' }), 'Guest ···9876');
+  assert.equal(guestLabel({ guest_name: 'Lee', description: '' }), 'Lee');
+});
+
+import { classify, validTwilioSignature } from '../src/notes.js';
+import crypto from 'node:crypto';
+
+test('classifies cleaner notes', () => {
+  assert.deepEqual(classify('Not enough hand towels or wash cloths'), ['supplies']);
+  assert.deepEqual(classify('Guests broke a lamp and left a stain on the rug'), ['condition']);
+  assert.deepEqual(classify('Really dirty this time, took me 2 extra hours'), ['condition']);
+  assert.deepEqual(classify('All done! See you Friday'), []);
+});
+
+test('notes tie to the right cleaning and stay; supplies become to-dos; damage is flagged', async () => {
+  const { app, sync } = setup();
+  await sync([['s1', '2026-11-05', '2026-11-08'], ['s2', '2026-11-12', '2026-11-15']]);
+  const [c1, c2] = app.db.prepare('SELECT * FROM cleanings ORDER BY date').all();
+  // Nov 8 afternoon Pacific: on cleaning day 1
+  const n1 = app.notes.add({ body: 'Not enough hand towels or wash cloths', phone: '+15550000003', at: '2026-11-08T22:00:00Z', source: 'group' });
+  assert.equal(n1.author, 'Rosa');
+  assert.equal(n1.cleaning_id, c1.id);
+  assert.equal(n1.booking_uid, 's1');
+  assert.equal(app.db.prepare("SELECT COUNT(*) n FROM todos WHERE status='open'").get().n, 1);
+  // Nov 9: report on the cleaning the day before
+  const n2 = app.notes.add({ body: 'Forgot to say, guests broke a wine glass', phone: '+15550000003', at: '2026-11-09T18:00:00Z', source: 'group' });
+  assert.equal(n2.cleaning_id, c1.id);
+  assert.equal(n2.followup, 'open');
+  // Nov 13: prep for the next cleaning, after stay s2
+  const n3 = app.notes.add({ body: 'Can I come at 10 on Sunday?', phone: '+15550000003', at: '2026-11-13T18:00:00Z', source: 'group' });
+  assert.equal(n3.cleaning_id, c2.id);
+  assert.equal(n3.booking_uid, 's2');
+  // re-file by hand
+  app.notes.update(n3.id, { cleaningId: c1.id, tags: ['condition'], by: 'Mark' });
+  assert.equal(app.notes.get(n3.id).booking_uid, 's1');
+  assert.equal(app.notes.get(n3.id).followup, 'open');
+  // owners' replies are saved but not turned into to-dos
+  app.notes.add({ body: "Thanks, I'll order more towels today", phone: '+15550000001', at: '2026-11-08T23:00:00Z', source: 'group' });
+  assert.equal(app.db.prepare("SELECT COUNT(*) n FROM todos").get().n, 1);
+  app.notes.setFollowup(n2.id, 'done');
+  assert.equal(app.notes.get(n2.id).followup, 'done');
+});
+
+test('Twilio webhooks: signature checked, notes saved, text passed on in individual mode', async () => {
+  const config = loadConfig({ DOTENV: '0', DB_FILE: ':memory:', DRY_RUN: '1', ADMIN_PASSWORD: 'pw', TWILIO_AUTH_TOKEN: 'secret',
+    APPROVERS: 'Mark:+15550000001:,Danielle:+15550000002:', CLEANER: 'Rosa:+15550000003', BASE_URL: 'https://app.example' });
+  const app = createApp(config);
+  await new Promise(r => app.server.listen(0, r));
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const params = new URLSearchParams({ From: '+15550000003', Body: 'We are out of toilet paper', To: '+15559999999' });
+  const sign = (url, p) => crypto.createHmac('sha1', 'secret').update(url + [...p.keys()].sort().map(k => k + p.get(k)).join('')).digest('base64');
+  try {
+    assert.equal((await fetch(base + '/twilio/sms', { method: 'POST', body: params, headers: { 'X-Twilio-Signature': 'nope' } })).status, 403);
+    assert.ok(validTwilioSignature('secret', 'https://app.example/twilio/sms', params, sign('https://app.example/twilio/sms', params)));
+    const ok = await fetch(base + '/twilio/sms', { method: 'POST', body: params, headers: { 'X-Twilio-Signature': sign('https://app.example/twilio/sms', params) } });
+    assert.equal(ok.status, 200);
+    assert.equal(app.db.prepare('SELECT author FROM notes').get().author, 'Rosa');
+    assert.deepEqual(app.db.prepare("SELECT to_addr FROM outbox").all().map(r => r.to_addr), ['+15550000001', '+15550000002']);
+    assert.match(app.db.prepare("SELECT body FROM outbox").get().body, /^Rosa: We are out of toilet paper/);
+    assert.equal(app.db.prepare("SELECT COUNT(*) n FROM todos").get().n, 1);
+
+    const conv = new URLSearchParams({ EventType: 'onMessageAdded', Author: '+15550000001', Body: 'Thanks Rosa!', DateCreated: '2026-11-08T22:00:00Z' });
+    await fetch(base + '/twilio/conversation', { method: 'POST', body: conv, headers: { 'X-Twilio-Signature': sign('https://app.example/twilio/conversation', conv) } });
+    const own = new URLSearchParams({ EventType: 'onMessageAdded', Author: 'cleaning-link', Body: 'CLEANING CONFIRMED' });
+    await fetch(base + '/twilio/conversation', { method: 'POST', body: own, headers: { 'X-Twilio-Signature': sign('https://app.example/twilio/conversation', own) } });
+    assert.deepEqual(app.db.prepare('SELECT author, source FROM notes ORDER BY id').all().map(r => `${r.author}/${r.source}`), ['Rosa/sms', 'Mark/group']);
+
+    // pages render
+    const auth = { Authorization: 'Basic ' + Buffer.from('x:pw').toString('base64') };
+    assert.match(await (await fetch(base + '/todos', { headers: auth })).text(), /We are out of toilet paper/);
+    assert.match(await (await fetch(base + '/notes', { headers: auth })).text(), /Thanks Rosa!/);
+  } finally { app.stop(); }
 });

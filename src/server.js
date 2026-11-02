@@ -7,13 +7,15 @@ import { createNotifier } from './notify.js';
 import { createService } from './service.js';
 import { syncAirbnb } from './sync.js';
 import { cleaningFeed } from './feed.js';
-import { isDate, todayIn, prettyDate } from './dates.js';
-import { layout, messagePage, approvalPage, groupDecisionPage, dashboard } from './views.js';
+import { isDate, todayIn, prettyDate, localToUtc } from './dates.js';
+import { layout, messagePage, approvalPage, groupDecisionPage, dashboard, notesPage, todosPage, cleaningPage } from './views.js';
+import { createNotes, validTwilioSignature } from './notes.js';
 
 export function createApp(config, deps = {}) {
   const db = deps.db || openDb(config);
   const notifier = deps.notifier || createNotifier(db, config, deps);
   const service = createService({ db, config, notifier });
+  const notes = createNotes({ db, config });
   const sync = (opts = {}) => syncAirbnb({ db, config, service, fetchImpl: deps.fetchImpl, ...opts });
 
   const safeEq = (a, b) => {
@@ -95,6 +97,32 @@ export function createApp(config, deps = {}) {
       return send(res, 200, messagePage('Done', r.message.status === 'sent' ? 'Sent to the group text.' : 'OK, nothing was sent to the group.', back));
     }
 
+    // Texts coming in from Twilio: replies to the app's number, and group-thread messages.
+    if (req.method === 'POST' && (p === '/twilio/sms' || p === '/twilio/conversation')) {
+      const body = await readBody(req);
+      if (!config.dryRun || config.twilio.token) {
+        if (!validTwilioSignature(config.twilio.token, config.baseUrl + p, body, req.headers['x-twilio-signature'])) return send(res, 403, 'Bad signature', 'text/plain');
+      }
+      if (p === '/twilio/sms') {
+        const from = body.get('From');
+        const n = notes.add({ body: body.get('Body'), phone: from, source: 'sms' });
+        // In "individual" mode there is no real group thread, so pass the text on to the others.
+        if (n && config.groupMode !== 'conversation') {
+          for (const person of config.groupMembers) {
+            if (person.phone && person.phone.replace(/\D/g, '').slice(-10) !== (from || '').replace(/\D/g, '').slice(-10)) await notifier.sms(person.phone, `${n.author}: ${n.body}`);
+          }
+        }
+        return send(res, 200, '<Response></Response>', 'text/xml');
+      }
+      // Conversations webhook (onMessageAdded). Skip the app's own messages.
+      if (body.get('EventType') === 'onMessageAdded' && body.get('Author') !== 'cleaning-link') {
+        const author = body.get('Author') || '';
+        notes.add({ body: body.get('Body'), phone: author.startsWith('+') ? author : null, author: author.startsWith('+') ? null : author,
+          at: body.get('DateCreated') ? new Date(body.get('DateCreated')).toISOString() : undefined, source: 'group' });
+      }
+      return send(res, 200, '', 'text/plain');
+    }
+
     // Everything below needs the dashboard password.
     if (!authed(req)) return send(res, 401, 'Login required', 'text/plain', { 'WWW-Authenticate': 'Basic realm="Cleaning Link"' });
     const who = validName(decodeURIComponent(cookie(req, 'who') || ''));
@@ -102,6 +130,13 @@ export function createApp(config, deps = {}) {
     if (req.method === 'GET' && p === '/') {
       const month = /^\d{4}-\d{2}$/.test(url.searchParams.get('month') || '') ? url.searchParams.get('month') : todayIn(config.timezone).slice(0, 7);
       return send(res, 200, dashboard({ config, service, db, month, who, flash: url.searchParams.get('flash') }));
+    }
+    if (req.method === 'GET' && p === '/notes') return send(res, 200, notesPage({ config, db, who }));
+    if (req.method === 'GET' && p === '/todos') return send(res, 200, todosPage({ config, db, who }));
+    m = p.match(/^\/cleanings\/(\d+)$/);
+    if (req.method === 'GET' && m) {
+      const page = cleaningPage({ config, db, who, service, id: Number(m[1]) });
+      return page ? send(res, 200, page) : send(res, 404, 'Not found', 'text/plain');
     }
     if (req.method !== 'POST') return send(res, 404, 'Not found', 'text/plain');
     const body = await readBody(req);
@@ -140,6 +175,33 @@ export function createApp(config, deps = {}) {
       if (r.message) return after(req, res, `/g/${r.message.token}?by=${encodeURIComponent(who)}`);
       return after(req, res, `/?month=${service.get(id).date.slice(0, 7)}&flash=${encodeURIComponent(m[2] === 'move' ? `Moved to ${prettyDate(service.get(id).date)}. The group hadn't been told about it yet, so there was nothing to send.` : 'Done.')}`);
     }
+    if (p === '/notes') {
+      const at = body.get('at') ? localInputToIso(body.get('at')) : undefined;
+      const cid = Number(body.get('cleaning_id')) || null;
+      const n = notes.add({ body: body.get('body'), author: body.get('author') || who, at, source: 'manual', cleaningId: cid });
+      const back = req.headers.referer && new URL(req.headers.referer).pathname.startsWith('/cleanings/') ? new URL(req.headers.referer).pathname : '/notes';
+      return redirect(res, n ? back : '/notes');
+    }
+    m = p.match(/^\/notes\/(\d+)(\/followup)?$/);
+    if (m) {
+      if (m[2]) notes.setFollowup(Number(m[1]), body.get('status'));
+      else notes.update(Number(m[1]), { cleaningId: Number(body.get('cleaning_id')) || null, tags: body.getAll('tag').filter(t => ['supplies', 'condition'].includes(t)), by: who });
+      const ref = req.headers.referer ? new URL(req.headers.referer).pathname : '/notes';
+      return redirect(res, ref);
+    }
+    if (p === '/todos') {
+      notes.addTodo({ title: body.get('title'), by: who });
+      return redirect(res, '/todos');
+    }
+    m = p.match(/^\/todos\/(\d+)$/);
+    if (m) {
+      notes.setTodo(Number(m[1]), body.get('done') === '1', who);
+      return redirect(res, '/todos');
+    }
+    if (p === '/bookings/name') {
+      db.prepare('UPDATE bookings SET guest_name = ? WHERE uid = ?').run((body.get('name') || '').trim().slice(0, 60) || null, body.get('uid') || '');
+      return redirect(res, '/');
+    }
     if (p === '/payments/request') {
       const ok = service.recordPaymentRequest(Number(body.get('id')), body.get('amount'), who);
       return redirect(res, ok ? '/#payments' : '/?flash=Enter+an+amount+above+zero#payments');
@@ -149,6 +211,12 @@ export function createApp(config, deps = {}) {
       return redirect(res, '/#payments');
     }
     return send(res, 404, 'Not found', 'text/plain');
+  }
+
+  // <input type="datetime-local"> gives wall-clock time at the rental
+  function localInputToIso(v) {
+    const mm = v.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
+    return mm ? localToUtc(mm[1], mm[2], config.timezone).toISOString() : undefined;
   }
 
   function validName(n) {
@@ -170,7 +238,7 @@ export function createApp(config, deps = {}) {
   }
   const stop = () => { clearInterval(timer); server.close(); };
 
-  return { server, db, service, sync, notifier, startBackground, stop };
+  return { server, db, service, notes, sync, notifier, startBackground, stop };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
