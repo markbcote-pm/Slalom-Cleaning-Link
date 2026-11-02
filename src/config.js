@@ -47,5 +47,7 @@ export function loadConfig(overrides = {}) {
     // everything else is logged as "held". Comma separated, e.g. +12076512735
     smsOnlyTo: (e.SMS_ONLY_TO || '').split(',').map(x => x.replace(/\D/g, '').slice(-10)).filter(x => x.length === 10),
     resend: { key: e.RESEND_API_KEY, from: e.EMAIL_FROM },
+    // Shown on the public /sms, /privacy and /terms pages as the support contact (optional).
+    supportEmail: e.SUPPORT_EMAIL || '',
   };
 }
