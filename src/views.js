@@ -19,7 +19,7 @@ table{width:100%;border-collapse:collapse}td,th{padding:8px 6px;border-top:1px s
 .dows{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));font-size:12px;color:var(--muted);text-align:center;margin-bottom:4px}
 .cal{display:flex;flex-direction:column;gap:4px}
 .week{display:grid;grid-template-columns:repeat(14,minmax(0,1fr));grid-template-rows:22px 24px 24px 26px;column-gap:0;row-gap:3px;position:relative}
-.day{cursor:pointer;grid-row:1/-1;min-width:0;border:1px solid var(--line);border-radius:8px;padding:2px 5px;font-size:12px;margin:0 2px}.day.out{background:var(--out);color:var(--muted)}.day.out b{font-weight:500}.day:hover{background:var(--win)}.day[data-past]{cursor:default}.day[data-past]:hover{background:none}.day.today{border-color:var(--accent);border-width:2px}.day.over{outline:2px dashed var(--accent)}
+.day{cursor:pointer;grid-row:1/-1;min-width:0;border:1px solid var(--line);border-radius:8px;padding:2px 5px;font-size:12px;margin:0 2px}.day.out{background:var(--out);color:var(--muted)}.day.out b{font-weight:500}.day:hover{background:var(--win)}.day[data-past]{cursor:default}.day[data-past]:hover{background:none}.day.today{border-color:var(--accent);border-width:2px}.day.over{outline:2px dashed var(--accent)}.day.review{background:var(--pending);border:2px solid var(--s-pending);animation:pulse 1.2s ease-in-out 3}@keyframes pulse{50%{box-shadow:0 0 0 6px rgba(161,98,7,.25)}}.danger-text{color:var(--warn)}
 .bar{pointer-events:none;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:12px;line-height:22px;padding:0 6px;border-radius:11px;z-index:1}
 .stay-bar{grid-row:2;background:var(--stay);color:#fff;font-weight:600}.stay-bar.pending{background:var(--s-pending)}.stay-bar.missing{background:var(--s-missing)}.stay-bar.past{background:var(--s-past)}.stay-bar.personal{background-image:repeating-linear-gradient(135deg,rgba(255,255,255,.18) 0 6px,transparent 6px 12px)}.stay-bar.flagged{box-shadow:inset 0 0 0 2px #ffd43b}.stay-bar.cont-l{border-top-left-radius:0;border-bottom-left-radius:0}.stay-bar.cont-r{border-top-right-radius:0;border-bottom-right-radius:0}
 .win-bar{grid-row:3;background:var(--win);color:var(--win-ink);border:1px dashed var(--win-line);line-height:20px;font-size:11px}
@@ -155,7 +155,7 @@ function calendar(month, cleanings, bookings, tz, config, extras = { counts: {},
       const staying = bookings.some(b => b.check_in < d && d < b.check_out);
       const turnover = bookings.some(b => b.check_out === d) && bookings.some(b => b.check_in === d);
       const booked = live.filter(c => c.date === d).length;
-      html += `<div class="day ${d.slice(0, 7) !== month ? 'out' : ''} ${d === today ? 'today' : ''}" data-date="${d}" data-label="${h(prettyDate(d))}"${staying ? ' data-staying="1"' : ''}${turnover ? ' data-turnover="1"' : ''}${booked ? ` data-booked="${booked}"` : ''}${d < today ? ' data-past="1"' : ''} style="grid-column:${2 * i + 1}/span 2" role="button" tabindex="0" aria-label="Add a cleaning on ${h(prettyDate(d))}"><b>${d.slice(8) === '01' || (d.slice(0, 7) !== month && d === ws) ? `${new Date(d + 'T12:00:00Z').toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short' })} ` : ''}${Number(d.slice(8))}</b></div>`;
+      html += `<div class="day ${d.slice(0, 7) !== month ? 'out' : ''} ${d === today ? 'today' : ''} ${extras.review?.date === d ? 'review' : ''}" data-date="${d}" data-label="${h(prettyDate(d))}"${staying ? ' data-staying="1"' : ''}${turnover ? ' data-turnover="1"' : ''}${booked ? ` data-booked="${booked}"` : ''}${d < today ? ' data-past="1"' : ''} style="grid-column:${2 * i + 1}/span 2" role="button" tabindex="0" aria-label="Add a cleaning on ${h(prettyDate(d))}"><b>${d.slice(8) === '01' || (d.slice(0, 7) !== month && d === ws) ? `${new Date(d + 'T12:00:00Z').toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short' })} ` : ''}${Number(d.slice(8))}</b></div>`;
     }
     for (const b of bookings) {
       if (b.check_out < ws || b.check_in > we) continue;
@@ -202,14 +202,16 @@ function calendar(month, cleanings, bookings, tz, config, extras = { counts: {},
 <div class="cal" id="cal">${weeks.join('')}</div>
 <p class="muted cal-help">Stays run from ${prettyTime(config.checkinTime)} check-in to ${prettyTime(config.checkoutTime)} checkout. Tap a day to add a cleaning. Tap a cleaning to open it, or drag it to another day to move it. You'll be asked before anything is texted to the group.</p>
 <dialog id="add-dialog"><form method="post" action="/cleanings">
-<h2 id="add-title">Add a cleaning</h2><input type="hidden" name="date" id="add-date">
+<h2 id="add-title">Add a cleaning</h2><input type="hidden" name="date" id="add-date"><input type="hidden" name="proposal" id="add-proposal">
+<p id="add-about" class="muted" hidden></p>
 <p id="add-warn" class="warn" hidden></p>
 <label for="add-note" class="muted">Note (optional)</label><textarea name="note" id="add-note" maxlength="300" placeholder="e.g. deep clean the oven" style="min-height:70px"></textarea>
-<div class="dialog-actions"><button name="arranged" value="1">Schedule, already arranged with ${h(config.cleaner?.name || 'the cleaner')}</button>
-<button class="ghost" name="arranged" value="0">Schedule and text the group</button>
+<div class="dialog-actions"><button name="arranged" value="1" id="add-arranged">Schedule, already arranged with ${h(config.cleaner?.name || 'the cleaner')}</button>
+<button class="ghost" name="arranged" value="0" id="add-text">Schedule and text the group</button>
+<button class="ghost danger-text" name="action" value="decline" id="add-decline" hidden formnovalidate onclick="return confirm('Decline this cleaning? Nothing is texted.')">Not needed</button>
 <button class="ghost" type="button" id="add-cancel">Cancel</button></div>
-<p class="muted" style="margin-bottom:0">"Already arranged" adds it without texting anyone. "Text the group" shows you the message before it goes out.</p></form>
-<details class="personal-add"><summary>Or add a personal stay starting this day</summary>
+<p class="muted" style="margin-bottom:0">"Already arranged" adds it without texting anyone. "Text the group" shows you the message before it goes out.<span id="add-other" hidden> To use a different day, close this and tap that day instead.</span></p></form>
+<details class="personal-add" id="personal-add"><summary>Or add a personal stay starting this day</summary>
 <form method="post" action="/personal" class="row" style="margin-top:8px"><input type="hidden" name="check_in" id="ps-in">
 <label class="muted">Leaving <input type="date" name="check_out" id="ps-out" required></label>
 <input name="name" placeholder="Who's staying (optional)" style="flex:1;min-width:150px"><button>Add personal stay</button></form>
@@ -219,7 +221,13 @@ const dlg=document.getElementById('add-dialog');
 function openAdd(d){if(d.dataset.past)return;document.getElementById('add-date').value=d.dataset.date;
 document.getElementById('ps-in').value=d.dataset.date;const o=document.getElementById('ps-out');o.min=d.dataset.date;const nx=new Date(d.dataset.date+'T12:00:00Z');nx.setUTCDate(nx.getUTCDate()+2);o.value=nx.toISOString().slice(0,10);document.getElementById('add-title').textContent='Add a cleaning on '+d.dataset.label;
 const w=[];if(d.dataset.staying)w.push('Guests are staying that day.');if(d.dataset.turnover)w.push('Same-day turnover: the window is ${prettyTime(config.checkoutTime)} to ${prettyTime(config.checkinTime)}.');if(d.dataset.booked)w.push('There is already a cleaning that day.');
-const el=document.getElementById('add-warn');el.textContent=w.join(' ');el.hidden=!w.length;document.getElementById('add-note').value='';dlg.showModal();}
+const el=document.getElementById('add-warn');el.textContent=w.join(' ');el.hidden=!w.length;document.getElementById('add-note').value='';const rv=review&&review.date===d.dataset.date?review:null;if(rv)el.hidden=true;setReview(rv);dlg.showModal();}
+const cleanerName=${JSON.stringify(config.cleaner?.name || 'the cleaner').replace(/</g, '\\u003c')};
+function setReview(r){const $=(i)=>document.getElementById(i);$('add-proposal').value=r?r.id:'';$('add-decline').hidden=!r;$('add-other').hidden=!r;$('add-about').hidden=!r;$('add-about').textContent=r?r.about:'';
+$('add-arranged').textContent=(r?'Approve':'Schedule')+', already arranged with '+cleanerName;$('add-text').textContent=(r?'Approve':'Schedule')+' and text the group';$('personal-add').hidden=!!r;
+if(r){$('add-title').textContent='Approve the cleaning on '+r.label;$('add-note').value=r.note;}}
+const review=${JSON.stringify(extras.review || null).replace(/</g, '\\u003c')};
+if(review){const d=document.querySelector('.day[data-date="'+review.date+'"]');if(d){d.scrollIntoView({block:'center'});setTimeout(()=>openAdd(d),350);}}
 document.getElementById('add-cancel').addEventListener('click',()=>dlg.close());
 dlg.addEventListener('click',e=>{if(e.target===dlg)dlg.close();});
 document.querySelectorAll('.day').forEach(d=>{d.addEventListener('click',()=>openAdd(d));d.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();openAdd(d);}});});
@@ -231,6 +239,12 @@ const r=await fetch('/cleanings/'+id+'/move',{method:'POST',headers:{'Content-Ty
 const j=await r.json();location.href=j.redirect||'/?month=${month}'})});
 {let sx=null,sy=0;const cal=document.getElementById('cal');cal.addEventListener('touchstart',e=>{sx=e.touches[0].clientX;sy=e.touches[0].clientY},{passive:true});cal.addEventListener('touchend',e=>{if(sx===null)return;const dx=e.changedTouches[0].clientX-sx,dy=e.changedTouches[0].clientY-sy;sx=null;if(Math.abs(dx)>70&&Math.abs(dx)>2*Math.abs(dy))location.href='/?month='+(dx<0?'${next}':'${prev}')})}
 </script>`;
+}
+
+function reviewFor(service, id) {
+  const c = id && service.get(id);
+  if (!c || c.status !== 'awaiting_approval') return null;
+  return { id: c.id, date: c.date, label: prettyDate(c.date), about: service.describe(c), note: c.note || '' };
 }
 
 function calendarExtras(db) {
@@ -374,12 +388,12 @@ function decisionsList({ db, service, who }) {
   const awaiting = db.prepare("SELECT * FROM cleanings WHERE status='awaiting_approval' ORDER BY date").all();
   return [
     ...pendingMsgs.map(m => `<tr><td>${h(prettyDate(m.date))}</td><td><span class="pill">Text the group?</span> ${h(m.body)}</td><td><a class="btn" href="/g/${m.token}?by=${encodeURIComponent(who)}">Decide</a></td></tr>`),
-    ...awaiting.map(c => `<tr><td>${h(prettyDate(c.date))}</td><td><span class="pill">Needs approval</span> ${h(service.describe(c))}</td><td><a class="btn" href="/a/${c.approval_token}?by=${encodeURIComponent(who)}">Review</a></td></tr>`),
+    ...awaiting.map(c => `<tr><td>${h(prettyDate(c.date))}</td><td><span class="pill">Needs approval</span> ${h(service.describe(c))}</td><td><a class="btn" href="/?month=${c.date.slice(0, 7)}&review=${c.id}">Review</a></td></tr>`),
   ];
 }
 
 // Home: just the calendar, with one line for anything that needs attention.
-export function dashboard({ config, service, db, month, who, flash }) {
+export function dashboard({ config, service, db, month, who, flash, review }) {
   const { today, cleanings, bookings } = pageData({ config, service, db, month });
   const lastSync = JSON.parse(db.prepare("SELECT value FROM meta WHERE key='last_sync'").get()?.value || 'null');
   const waiting = decisionsList({ db, service, who }).length;
@@ -393,7 +407,7 @@ export function dashboard({ config, service, db, month, who, flash }) {
 <form method="post" action="/sync"><button class="ghost small">Check Airbnb now</button></form></div>
 ${flash ? `<div class="flash">${h(flash)}</div>` : ''}
 ${alerts.length ? `<div class="alerts">${alerts.join('')}</div>` : ''}
-<div class="card">${calendar(month, cleanings, bookings, config.timezone, config, calendarExtras(db))}</div>`);
+<div class="card">${calendar(month, cleanings, bookings, config.timezone, config, { ...calendarExtras(db), review: reviewFor(service, review) })}</div>`);
 }
 
 export function inboxPage({ config, service, db, who }) {

@@ -68,6 +68,26 @@ export function createService({ db, config, notifier }) {
     return { cleaning: get(c.id) };
   }
 
+  // Approve a proposed cleaning from the calendar, the same two ways as adding one by hand:
+  // already arranged (nothing texted) or text the group (the message is shown before it goes out).
+  async function approveProposal(id, by, { alreadyArranged = false, note = '' } = {}) {
+    let c = get(id);
+    if (!c) return { error: 'Cleaning not found.' };
+    if (c.status !== 'awaiting_approval') return { cleaning: c, already: true };
+    const prevKnown = c.group_known_date;
+    c = update(c.id, { status: 'approved', approved_by: by, approved_at: nowIso(), approval_token: null, ...(note ? { note } : {}) });
+    logEvent(c.id, 'Approved', `by ${by}`);
+    if (alreadyArranged) {
+      c = update(c.id, { group_known_date: c.date });
+      logEvent(c.id, 'Cleaner texted', `Arranged directly with ${config.cleaner?.name || 'the cleaner'}, no text sent`);
+      return { cleaning: c };
+    }
+    const moved = prevKnown && prevKnown !== c.date;
+    const msg = await askAboutGroupMessage(c, moved ? 'moved' : 'confirmed',
+      moved ? `CLEANING DATE CHANGED: was ${prettyDate(prevKnown)}, now ${describe(c)}` : confirmText(c));
+    return { cleaning: c, message: msg };
+  }
+
   async function decline(approvalToken, by) {
     const c = db.prepare('SELECT * FROM cleanings WHERE approval_token = ?').get(approvalToken);
     if (!c) return { error: 'This link is not valid any more.' };
@@ -329,7 +349,7 @@ export function createService({ db, config, notifier }) {
   }
 
   return {
-    get, list, stageOf, describe, windowFor, cleaningInWindow, addPersonalStay, updatePersonalStay, removePersonalStay, requestApproval, approve, decline, decideGroupMessage, addManual, move, cancel,
+    get, list, stageOf, describe, windowFor, cleaningInWindow, addPersonalStay, updatePersonalStay, removePersonalStay, requestApproval, approve, approveProposal, decline, decideGroupMessage, addManual, move, cancel,
     customGroupMessage, autoComplete, recordPaymentRequest, markPaid, logEvent, update,
   };
 }
