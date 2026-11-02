@@ -147,14 +147,17 @@ export function createApp(config, deps = {}) {
     if (p === '/sync') {
       try {
         const r = await sync();
-        return redirect(res, '/?flash=' + encodeURIComponent(r.skipped || `Airbnb checked: ${r.total} bookings, ${r.added} new, ${r.moved} moved, ${r.cancelled} cancelled.${r.warning ? ' ' + r.warning : ''}`));
+        return redirect(res, '/?flash=' + encodeURIComponent(r.skipped || `Airbnb checked: ${r.total} bookings, ${r.added} new cleanings proposed, ${r.covered || 0} already covered by a scheduled cleaning, ${r.moved} moved, ${r.cancelled} cancelled.${r.warning ? ' ' + r.warning : ''}`));
       } catch (e) { return redirect(res, '/?flash=' + encodeURIComponent('Could not read the Airbnb calendar: ' + e.message)); }
     }
     if (p === '/cleanings') {
       const date = body.get('date');
       if (!isDate(date)) return redirect(res, '/?flash=Pick+a+date');
-      const r = await service.addManual(date, (body.get('note') || '').slice(0, 300), who);
-      return redirect(res, `/g/${r.message.token}?by=${encodeURIComponent(who)}`);
+      const r = await service.addManual(date, (body.get('note') || '').slice(0, 300), who, { alreadyArranged: body.get('arranged') === '1' });
+      const extra = (r.replaced ? ` It replaces the ${prettyDate(r.replaced.date)} cleaning that was waiting for approval.` : '')
+        + (r.conflict ? ` Heads up: a cleaning on ${prettyDate(r.conflict.date)} is already scheduled for this turnover.` : '');
+      if (r.message) return redirect(res, `/g/${r.message.token}?by=${encodeURIComponent(who)}`);
+      return redirect(res, `/?month=${date.slice(0, 7)}&flash=${encodeURIComponent(`Cleaning scheduled for ${prettyDate(date)}. Nothing was texted.${extra}`)}`);
     }
     m = p.match(/^\/cleanings\/(\d+)\/(move|cancel|message)$/);
     if (m) {

@@ -261,18 +261,27 @@ ${todos.length ? `<div class="card"><h2>To-dos from this cleaning</h2><ul>${todo
 <div class="card"><h2>History</h2><table>${events.map(e => `<tr><td class="muted" style="white-space:nowrap">${h(when(e.at, config.timezone))}</td><td><b>${h(e.stage)}</b> ${h(e.detail || '')}</td></tr>`).join('')}</table></div>`);
 }
 
-function staysCard(bookings, today, config) {
+function staysCard(bookings, today, config, cleanings = []) {
+  const live = cleanings.filter(c => !['cancelled', 'declined'].includes(c.status));
   const wins = cleaningWindows(bookings);
   const sorted = [...bookings].sort((a, b) => a.check_in.localeCompare(b.check_in));
   const rows = sorted.map((b, i) => [b, wins[i]]).filter(([b]) => b.check_out >= today).map(([b, w]) => {
     const nights = daysBetween(b.check_in, b.check_out);
     const gap = !w.to ? 'No next booking yet' : w.to === w.from ? '<b class="warn">Same day</b>' : `${w.days} days (${h(prettyDate(w.from))} to ${h(prettyDate(w.to))})`;
+    const covering = live.find(c => c.date >= w.from && (!w.to || c.date <= w.to));
+    const plan = covering
+      ? `<div><a href="/cleanings/${covering.id}">${covering.status === 'awaiting_approval' ? 'Proposed' : 'Cleaning'} ${h(prettyDate(covering.date))}</a>${covering.status === 'awaiting_approval' ? ' <span class="muted">(waiting for approval)</span>' : ' ✓'}</div>`
+      : '';
+    const form = !covering || covering.status === 'awaiting_approval'
+      ? `<form method="post" action="/cleanings" class="row" style="margin-top:4px"><input type="hidden" name="arranged" value="1">
+<input type="date" name="date" value="${w.from}" min="${w.from}" ${w.to ? `max="${w.to}"` : ''} required><button class="ghost" title="Already arranged with the cleaner, nothing is texted">Schedule</button></form>`
+      : '';
     return `<tr><td><form method="post" action="/bookings/name" class="row"><input type="hidden" name="uid" value="${h(b.uid)}">
 <input name="name" value="${h(b.guest_name || '')}" placeholder="${h(guestLabel(b))}" style="width:150px"><button class="ghost">Save</button></form></td>
-<td>${h(prettyDate(b.check_in))} to ${h(prettyDate(b.check_out))}<div class="muted">${nights} night${nights === 1 ? '' : 's'}</div></td><td>${gap}</td></tr>`;
+<td>${h(prettyDate(b.check_in))} to ${h(prettyDate(b.check_out))}<div class="muted">${nights} night${nights === 1 ? '' : 's'}</div></td><td>${gap}${plan}${form}</td></tr>`;
   }).join('');
   return `<div class="card"><h2>Stays and cleaning windows</h2>
-<p class="muted">Airbnb's calendar link doesn't include guest names, only the last 4 digits of their phone. Type a name here and it shows on the calendar.</p>
+<p class="muted">Airbnb's calendar link doesn't include guest names, only the last 4 digits of their phone. Type a name here and it shows on the calendar. "Schedule" books a cleaning you've already arranged, without texting anyone.</p>
 ${rows ? `<div class="scroll"><table><tr><th>Guest</th><th>Stay</th><th>Time to clean after</th></tr>${rows}</table></div>` : '<p class="muted">No upcoming stays.</p>'}</div>`;
 }
 
@@ -312,10 +321,11 @@ export function dashboard({ config, service, db, month, who, flash }) {
 ${flash ? `<div class="card">${h(flash)}</div>` : ''}
 ${decisions ? `<div class="card"><h2>Waiting on you</h2><div class="scroll"><table>${decisions}</table></div></div>` : ''}
 <div class="card">${calendar(month, cleanings, bookings, config.timezone, config, calendarExtras(db))}</div>
-${staysCard(bookings, today, config)}
-<div class="card"><h2>Add a cleaning day</h2><form method="post" action="/cleanings" class="row">
-<input type="date" name="date" required min="${today}"><input name="note" placeholder="Note for the cleaner (optional)" style="flex:1;min-width:180px"><button>Add</button></form>
-<p class="muted">Days you add count as approved. You'll see the group text before it goes out.</p></div>
+${staysCard(bookings, today, config, cleanings)}
+<div class="card" id="schedule"><h2>Schedule a cleaning</h2><form method="post" action="/cleanings">
+<div class="row"><input type="date" name="date" required min="${today}"><input name="note" placeholder="Note (optional)" style="flex:1;min-width:180px"></div>
+<div class="row" style="margin-top:8px"><button name="arranged" value="1">Schedule, already arranged with ${h(config.cleaner?.name || 'the cleaner')}</button><button class="ghost" name="arranged" value="0">Schedule and text the group</button></div></form>
+<p class="muted">Use the first button for days you've already agreed with ${h(config.cleaner?.name || 'the cleaner')}: nothing is texted. A scheduled cleaning covers the turnover it falls in, so the app won't propose another cleaning between those two stays.</p></div>
 <div class="card"><h2>Upcoming cleanings</h2>${rows ? `<div class="scroll"><table><tr><th>Day</th><th>Progress</th><th>Change</th></tr>${rows}</table></div>` : '<p class="muted">Nothing scheduled.</p>'}</div>
 <div class="card" id="payments"><h2>Cleaner payments</h2>
 <p>Owed now: <b>${money(owedTotal)}</b> for ${owed.length} cleaning(s) · Paid this year: ${money(paidYear.s)} (${paidYear.n})</p>

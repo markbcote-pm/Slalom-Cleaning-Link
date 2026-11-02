@@ -317,3 +317,37 @@ test('Twilio webhooks: signature checked, notes saved, text passed on in individ
     assert.match(await (await fetch(base + '/notes', { headers: auth })).text(), /Thanks Rosa!/);
   } finally { app.stop(); }
 });
+
+test('hand-scheduled cleanings: no text when already arranged, and Airbnb sync does not propose another', async () => {
+  const { app, outbox, clearOutbox, sync } = setup();
+  // Mark already arranged Nov 9 with the cleaner, before the app saw the bookings.
+  const { cleaning, message } = await app.service.addManual('2026-11-09', null, 'Mark', { alreadyArranged: true });
+  assert.equal(message, undefined);
+  assert.equal(outbox().length, 0, 'nothing texted');
+  assert.equal(cleaning.group_known_date, '2026-11-09');
+  assert.ok(app.service.stageOf(cleaning).find(s => s.name === 'Cleaner texted').done);
+
+  const r = await sync([['s1', '2026-11-05', '2026-11-08'], ['s2', '2026-11-12', '2026-11-15'], ['s3', '2026-11-15', '2026-11-18']]);
+  assert.equal(r.covered, 1);
+  assert.equal(r.added, 2, 's2 and s3 still get proposals');
+  assert.equal(app.service.get(cleaning.id).booking_uid, 's1', 'manual cleaning adopted the stay');
+  assert.equal(app.db.prepare("SELECT COUNT(*) n FROM cleanings WHERE date='2026-11-08'").get().n, 0);
+  // syncing again doesn't propose it either
+  assert.equal((await sync([['s1', '2026-11-05', '2026-11-08'], ['s2', '2026-11-12', '2026-11-15'], ['s3', '2026-11-15', '2026-11-18']])).added, 0);
+
+  // Scheduling by hand in a turnover that already has a pending proposal replaces it.
+  const pending = app.db.prepare("SELECT * FROM cleanings WHERE booking_uid='s3'").get();
+  assert.equal(pending.status, 'awaiting_approval');
+  clearOutbox();
+  const r2 = await app.service.addManual('2026-11-19', null, 'Danielle', { alreadyArranged: true });
+  assert.equal(r2.replaced.id, pending.id);
+  assert.equal(app.service.get(pending.id).status, 'cancelled');
+  assert.equal(app.service.get(r2.cleaning.id).booking_uid, 's3');
+  assert.equal(outbox().length, 0);
+  assert.ok((await app.service.approve(pending.approval_token, 'Mark')).error, 'old approval link is dead');
+
+  // Moving an arranged cleaning later still asks before texting the group.
+  const mv = await app.service.move(cleaning.id, '2026-11-10', 'Mark');
+  assert.ok(mv.message);
+  assert.match(mv.message.body, /was Mon, Nov 9, now Tue, Nov 10/);
+});
