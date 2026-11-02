@@ -581,7 +581,7 @@ ${owed.length ? `<h2 style="margin-top:14px">Requested, not paid yet</h2><form m
 ${recentPaid ? `<h2 style="margin-top:14px">Recently paid</h2><table>${recentPaid}</table>` : ''}</div>`);
 }
 
-function textingCard(config, who, flash = '') {
+function textingCard(config, who, flash = '', consents = {}) {
   const me = config.approvers.find(a => a.name === who) || config.approvers[0];
   const only = config.smsOnlyTo || [];
   const fmt = (d) => `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
@@ -595,13 +595,20 @@ function textingCard(config, who, flash = '') {
 <tr><th>Group texts</th><td>${config.groupMode === 'conversation' ? 'One shared group thread (Twilio Conversations)' : 'Same text sent to each person separately'}</td></tr>
 <tr><th>Replies come in at</th><td><code>${h(config.baseUrl)}/twilio/sms</code><div class="muted">Paste this into your Twilio number's "A message comes in" webhook (HTTP POST).</div></td></tr>
 ${missing.length ? `<tr><th>Missing in Render</th><td class="warn">${missing.join(', ')}</td></tr>` : ''}</table>
+<h2 style="margin-top:14px">Who gets texts</h2>
+<p class="muted">Before anyone gets texts, read them the consent script on the <a href="/sms">public texts page</a>. Once they say yes, tap the button: it records the date and sends them the sign-up confirmation text, as the page describes.</p>
+<table>${config.groupMembers.filter(p => p.phone).map(p => {
+    const c = consents[p.phone.replace(/\D/g, '').slice(-10)];
+    return `<tr><td><b>${h(p.name)}</b><div class="muted">${h(p.phone)}</div></td><td>${c ? `Agreed ${h(new Date(c.at).toLocaleDateString('en-US', { timeZone: config.timezone, month: 'short', day: 'numeric', year: 'numeric' }))}, recorded by ${h(c.by)}` : '<span class="muted">No consent recorded</span>'}</td>
+<td><form method="post" action="/texting/consent" onsubmit="return confirm('Did ${h(p.name)} agree after hearing the script? This sends them the sign-up confirmation text.')"><input type="hidden" name="phone" value="${h(p.phone)}"><button class="ghost">${c ? 'Record again' : 'They agreed'}</button></form></td></tr>`;
+  }).join('')}</table>
 <form method="post" action="/texting/test" class="row" style="margin-top:10px"><button ${config.dryRun || !me?.phone ? 'disabled' : ''}>Send me a test text</button><span class="muted">${me?.phone ? `Goes only to ${h(me.name)} at ${h(me.phone)}, then checks it was delivered.` : 'No phone number on file for you.'}</span></form></div>`;
 }
 
 export function morePage({ config, db, who, flash }) {
   const outbox = db.prepare('SELECT * FROM outbox ORDER BY id DESC LIMIT 40').all();
   return layout('More', `${header({ config, db, who, active: 'more' })}
-${textingCard(config, who, flash)}
+${textingCard(config, who, flash, Object.fromEntries(db.prepare("SELECT key, value FROM meta WHERE key LIKE 'consent:%'").all().map(r => [r.key.slice(8), JSON.parse(r.value)])))}
 <div class="card"><h2>Calendar for Google, iCal and Skylight</h2><p>Subscribe to this address (Google Calendar: Other calendars, From URL):</p>
 <p><code>${h(config.baseUrl)}/feed/${h(config.feedToken)}.ics</code></p><p class="muted">Only approved cleanings appear. Google refreshes subscribed calendars every few hours.</p></div>
 <div class="card"><h2>Messages sent</h2><div class="scroll"><table><tr><th>When</th><th>To</th><th>Message</th><th>Status</th></tr>
