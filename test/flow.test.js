@@ -699,3 +699,42 @@ test('Recording consent stores the date and sends the sign-up confirmation text'
     assert.match(await (await fetch(base + '/more', { headers: auth })).text(), /Rosa<\/b>[\s\S]*Agreed [A-Z][a-z]{2} \d+, \d{4}, recorded by Mark/);
   } finally { app.stop(); }
 });
+
+test('Jenn texting back "yes" confirms the cleaning she was asked about', async () => {
+  const config = loadConfig({ DOTENV: '0', DB_FILE: ':memory:', DRY_RUN: '1',
+    APPROVERS: 'Mark:+12075550000:', CLEANER: 'Jenn:+19735550000', CLEANING_FEE: '0' });
+  const app = createApp(config);
+  await new Promise(r => app.server.listen(0, r));
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const reply = (from, body) => fetch(base + '/twilio/sms', { method: 'POST', body: new URLSearchParams({ From: from, Body: body }) });
+  const state = (id) => cleaningState(app.service.get(id), '2026-01-01');
+  try {
+    const ask = async (date) => {
+      const { cleaning, message } = await app.service.addManual(date, null, 'Mark');
+      await app.service.decideGroupMessage(message.token, true, 'Mark');
+      return cleaning.id;
+    };
+    const a = await ask('2099-01-10');
+    // Owners saying yes, or Jenn saying no, changes nothing.
+    await reply('+12075550000', 'Yes');
+    await reply('+19735550000', "Sorry, can't that day");
+    await reply('+19735550000', 'Yes? which day');
+    assert.equal(state(a), 'asked');
+    await reply('+19735550000', 'Yes! See you then');
+    assert.equal(state(a), 'confirmed');
+    assert.match(app.db.prepare("SELECT detail FROM events WHERE cleaning_id = ? AND stage = 'Cleaner confirmed'").get(a).detail, /Jenn replied "Yes! See you then"/);
+
+    // Two open asks: a bare yes is ambiguous, a date picks one, "both" takes all.
+    const b = await ask('2099-02-03');
+    const c = await ask('2099-02-21');
+    await reply('+19735550000', 'Sounds good');
+    assert.deepEqual([state(b), state(c)], ['asked', 'asked']);
+    await reply('+19735550000', 'Yes for Feb 21');
+    assert.deepEqual([state(b), state(c)], ['asked', 'confirmed']);
+    const d = await ask('2099-03-05');
+    await reply('+19735550000', '👍 both work');
+    assert.deepEqual([state(b), state(d)], ['confirmed', 'confirmed']);
+    // Its own text still lands in Notes.
+    assert.ok(app.db.prepare("SELECT 1 FROM notes WHERE body = 'Yes for Feb 21'").get());
+  } finally { app.stop(); }
+});

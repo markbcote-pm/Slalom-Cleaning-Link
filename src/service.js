@@ -322,6 +322,51 @@ export function createService({ db, config, notifier }) {
     return { cleaning: get(id) };
   }
 
+  // A text from the cleaner that says yes ("Yes", "Sounds good", "👍") confirms the cleaning
+  // she was asked about. With several open asks, it needs a date ("yes for the 23rd") or
+  // "both"/"all"; otherwise it is left for Mark or Danielle to confirm by hand.
+  const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  function isCleaner(phone, author) {
+    const c = config.cleaner;
+    if (!c) return false;
+    const digits = (x) => String(x || '').replace(/\D/g, '').slice(-10);
+    if (phone && c.phone && digits(phone) === digits(c.phone)) return true;
+    return !!author && author.trim().toLowerCase() === c.name.trim().toLowerCase();
+  }
+  function saysYes(text) {
+    const t = String(text || '').toLowerCase().trim();
+    if (/\b(no|nope|not|can'?t|cannot|won'?t|unable|sorry|maybe|unless|wait)\b/.test(t) || t.includes('?')) return false;
+    return /^(yes|yes!|yep|yeah|yup|ya|y|sure|ok|okay|k|confirmed?|sounds good|will do|i can|can do|works|that works|got it|perfect|great|absolutely|definitely)\b/.test(t)
+      || /^(👍|✅|👌)/u.test(t) || /\b(i'?ll be there|see you then|i'?m in)\b/.test(t);
+  }
+  function mentionedDates(text, dates) {
+    const t = String(text || '').toLowerCase();
+    return dates.filter(d => {
+      const [, m, day] = d.split('-').map(Number);
+      const mon = MONTHS[m - 1];
+      return new RegExp(`\\b${m}/${day}\\b`).test(t)
+        || new RegExp(`\\b${mon}[a-z]*\\.?\\s*${day}(st|nd|rd|th)?\\b`).test(t)
+        || new RegExp(`\\b(the\\s+)?${day}(st|nd|rd|th)\\b`).test(t);
+    });
+  }
+  function cleanerReply({ body, phone = null, author = null }) {
+    if (!isCleaner(phone, author) || !saysYes(body)) return { confirmed: [] };
+    const today = todayIn(config.timezone);
+    const open = db.prepare(`SELECT * FROM cleanings WHERE status NOT IN ('awaiting_approval','declined','cancelled','completed','paid')
+      AND date >= ? AND group_known_date = date AND cleaner_confirmed_at IS NULL ORDER BY date`).all(today);
+    let pick = [];
+    if (open.length === 1) pick = open;
+    else if (open.length > 1) {
+      const named = mentionedDates(body, open.map(c => c.date));
+      pick = named.length ? open.filter(c => named.includes(c.date)) : /\b(both|all( of them)?|each)\b/i.test(body) ? open : [];
+    }
+    for (const c of pick) {
+      update(c.id, { cleaner_confirmed_at: nowIso() });
+      logEvent(c.id, 'Cleaner confirmed', `${config.cleaner.name} replied "${String(body).trim().slice(0, 80)}"`);
+    }
+    return { confirmed: pick.map(c => get(c.id)), open: open.length };
+  }
+
   async function customGroupMessage(id, body, by) {
     return askAboutGroupMessage(get(id), 'custom', body);
   }
@@ -442,6 +487,6 @@ export function createService({ db, config, notifier }) {
 
   return {
     get, list, stageOf, describe, windowFor, cleaningInWindow, addPersonalStay, updatePersonalStay, removePersonalStay, requestApproval, approve, approveProposal, dropCoveredProposals, decline, decideGroupMessage, testGroupMessage, undoSkip, restoreDeclined, addManual, move, cancel,
-    customGroupMessage, confirmByCleaner, autoComplete, recordPaymentRequest, markPaid, logEvent, update,
+    customGroupMessage, confirmByCleaner, cleanerReply, autoComplete, recordPaymentRequest, markPaid, logEvent, update,
   };
 }

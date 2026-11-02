@@ -442,7 +442,7 @@ function decisionsList({ db, service, who, config }) {
   return [
     ...pendingMsgs.map(m => `<tr><td>${h(prettyDate(m.date))}</td><td><span class="pill">Text the group?</span> ${h(m.body)}</td><td><a class="btn" href="/?month=${m.date.slice(0, 7)}&msg=${m.token}">Decide</a></td></tr>`),
     ...awaiting.map(c => `<tr><td>${h(prettyDate(c.date))}</td><td><span class="pill">Needs approval</span> ${h(service.describe(c))}</td><td><a class="btn" href="/?month=${c.date.slice(0, 7)}&review=${c.id}">Review</a></td></tr>`),
-    ...asked.map(c => `<tr><td><a href="/cleanings/${c.id}">${h(prettyDate(c.date))}</a></td><td><span class="pill asked">Waiting on ${cleaner}</span> Texted to the group. Did ${cleaner} say yes?</td><td><form method="post" action="/cleanings/${c.id}/confirm"><input type="hidden" name="back" value="inbox"><button>${cleaner} confirmed</button></form></td></tr>`),
+    ...asked.map(c => `<tr><td><a href="/cleanings/${c.id}">${h(prettyDate(c.date))}</a></td><td><span class="pill asked">Waiting on ${cleaner}</span> Texted to the group. A "yes" from ${cleaner} to the app's number confirms it automatically, or tap the button if she said yes another way.</td><td><form method="post" action="/cleanings/${c.id}/confirm"><input type="hidden" name="back" value="inbox"><button>${cleaner} confirmed</button></form></td></tr>`),
   ];
 }
 
