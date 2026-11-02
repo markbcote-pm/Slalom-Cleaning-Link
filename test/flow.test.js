@@ -781,3 +781,22 @@ test('Sign-in page: remember this device keeps a signed cookie; wrong tries are 
     assert.equal((await login('slalom')).status, 429);
   } finally { app.stop(); }
 });
+
+test('Calendar feed URL is letters and digits even when Render\'s token has "/" "+" "="', async () => {
+  const token = 'oVtk/w9VQ+XUR0re5iu/AfWM=';
+  const config = loadConfig({ DOTENV: '0', DB_FILE: ':memory:', DRY_RUN: '1', ADMIN_PASSWORD: 'pw', FEED_TOKEN: token, APPROVERS: 'Mark:+12075550000:', CLEANER: 'Jenn:' });
+  assert.match(config.feedId, /^[0-9a-f]{32}$/);
+  const app = createApp(config);
+  await new Promise(r => app.server.listen(0, r));
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  try {
+    const r = await fetch(`${base}/feed/${config.feedId}.ics`);
+    assert.equal(r.status, 200);
+    assert.match(r.headers.get('content-type'), /text\/calendar/);
+    assert.match(await r.text(), /^BEGIN:VCALENDAR\r\n/);
+    assert.equal((await fetch(`${base}/feed/${token}.ics`)).status, 200, 'old link still works');
+    assert.equal((await fetch(`${base}/feed/${'0'.repeat(32)}.ics`)).status, 404);
+    const more = await (await fetch(base + '/more', { headers: { Authorization: 'Basic ' + Buffer.from('x:pw').toString('base64') } })).text();
+    assert.ok(more.includes(`/feed/${config.feedId}.ics`));
+  } finally { app.stop(); }
+});
