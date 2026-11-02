@@ -346,6 +346,13 @@ test('hand-scheduled cleanings: no text when already arranged, and Airbnb sync d
   assert.equal(outbox().length, 0);
   assert.ok((await app.service.approve(pending.approval_token, 'Mark')).error, 'old approval link is dead');
 
+  // A mid-stay cleaning (guests of s2 are there Nov 12-15) doesn't take over any turnover.
+  const s2Pending = app.db.prepare("SELECT * FROM cleanings WHERE booking_uid='s2'").get();
+  const mid = await app.service.addManual('2026-11-13', 'Mid-stay refresh', 'Mark', { alreadyArranged: true });
+  assert.equal(mid.replaced, null);
+  assert.equal(mid.cleaning.booking_uid, null);
+  assert.equal(app.service.get(s2Pending.id).status, 'awaiting_approval');
+
   // Moving an arranged cleaning later still asks before texting the group.
   const mv = await app.service.move(cleaning.id, '2026-11-10', 'Mark');
   assert.ok(mv.message);

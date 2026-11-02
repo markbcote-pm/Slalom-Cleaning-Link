@@ -151,7 +151,13 @@ export function createService({ db, config, notifier }) {
     logEvent(c.id, 'Approved', `by ${by}`);
 
     // Take over the turnover this day sits in, so the app doesn't propose another cleaning for it.
-    const { prior } = windowFor(date);
+    // Only when the day falls between that stay's checkout and the next check-in; a
+    // mid-stay cleaning doesn't cover any turnover.
+    let { prior } = windowFor(date);
+    if (prior) {
+      const following = db.prepare("SELECT check_in FROM bookings WHERE status='active' AND check_in >= ? AND uid != ? ORDER BY check_in LIMIT 1").get(prior.check_out, prior.uid);
+      if (following && following.check_in < date) prior = null;
+    }
     let replaced = null, conflict = null;
     if (prior) {
       const existing = db.prepare('SELECT * FROM cleanings WHERE booking_uid = ?').get(prior.uid);
