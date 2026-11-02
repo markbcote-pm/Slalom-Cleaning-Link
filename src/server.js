@@ -26,7 +26,13 @@ export function createApp(config, deps = {}) {
   const service = createService({ db, config, notifier });
   const notes = createNotes({ db, config });
   const push = deps.push || createPush({ db, config, fetchImpl: deps.fetchImpl });
-  const sync = (opts = {}) => syncAirbnb({ db, config, service, fetchImpl: deps.fetchImpl, ...opts });
+  const sync = async (opts = {}) => {
+    const r = await syncAirbnb({ db, config, service, fetchImpl: deps.fetchImpl, ...opts });
+    if (r.newBookings?.length || r.changed?.length) {
+      try { await push.bookingNews(r); } catch (e) { console.error('Booking notification failed:', e.message); }
+    }
+    return r;
+  };
 
   const safeEq = (a, b) => {
     const x = Buffer.from(String(a)), y = Buffer.from(String(b));

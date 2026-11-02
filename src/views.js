@@ -622,7 +622,8 @@ function pushCard(push, flash) {
   const subs = push.subscriptions();
   const items = push.unsettled();
   return `<div class="card" id="push"><h2>Phone notifications</h2>
-<p>Every morning at 9, phones with notifications on get one alert if any cleaning in the next 7 days isn't set yet: still needs your OK, not sent, waiting on the cleaner to confirm, or a stay with no cleaning before it. Tapping it opens Waiting on you.</p>
+<p>When a new Airbnb booking comes in (or its dates change), you get an alert right away; tapping it opens that cleaning so you can approve it and text the cleaner.</p>
+<p>Every morning at 9, phones with notifications on also get one alert if any cleaning in the next 7 days isn't set yet: still needs your OK, not sent, waiting on the cleaner to confirm, or a stay with no cleaning before it. Tapping it opens Waiting on you.</p>
 ${flash && /notification/i.test(flash) ? `<p class="flash">${h(flash)}</p>` : ''}
 <p class="muted">Right now: ${items.length ? h(items.map(i => i.text).join('; ')) : 'nothing in the next 7 days needs you.'}</p>
 <p class="muted">Turned on for ${subs.length ? h(subs.map(s => s.who).join(', ')) : 'no devices yet'}.</p>

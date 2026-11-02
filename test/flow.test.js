@@ -897,3 +897,39 @@ test('Phone notifications: encrypted Web Push that a browser can decrypt, and a 
     gone.stop();
   } finally { app.stop(); }
 });
+
+test('A new Airbnb booking sends a phone notification that opens its cleaning for approval', async () => {
+  const pushes = [];
+  const fakePush = { bookingNews: async (r) => pushes.push(r), dailyReminder: async () => ({}), subscriptions: () => [], unsettled: () => [], publicKey: () => 'k' };
+  const config = loadConfig({ DOTENV: '0', DB_FILE: ':memory:', DRY_RUN: '1', APPROVERS: 'Mark:+15550000001:', CLEANER: 'Jenn:', TIMEZONE: 'America/Los_Angeles' });
+  const app = createApp(config, { push: fakePush });
+  const sync = (stays) => app.sync({ icalText: airbnb(stays), now: NOW });
+  // First check ever: existing bookings are not news.
+  await sync([['s1', '2026-11-05', '2026-11-08']]);
+  assert.equal(pushes.length, 0);
+  // A new reservation arrives.
+  await sync([['s1', '2026-11-05', '2026-11-08'], ['s2', '2026-11-20', '2026-11-23']]);
+  assert.equal(pushes.length, 1);
+  assert.deepEqual(pushes[0].newBookings.map(n => [n.uid, n.cleaning.date, !!n.covered]), [['s2', '2026-11-23', false]]);
+  // Nothing new: no push. Dates change: a push about the change.
+  await sync([['s1', '2026-11-05', '2026-11-08'], ['s2', '2026-11-20', '2026-11-23']]);
+  assert.equal(pushes.length, 1);
+  await sync([['s1', '2026-11-05', '2026-11-08'], ['s2', '2026-11-20', '2026-11-24']]);
+  assert.deepEqual(pushes[1].changed.map(n => [n.uid, n.cleaning.date]), [['s2', '2026-11-24']]);
+  app.stop();
+
+  // The real notification text and link.
+  const sent = [];
+  const real = createApp(config, { fetchImpl: async (url, o) => { sent.push(o); return { ok: true, status: 201 }; } });
+  const ua = crypto.createECDH('prime256v1'); const uaPub = ua.generateKeys();
+  real.push.subscribe({ endpoint: 'https://push.example/x', keys: { p256dh: uaPub.toString('base64url'), auth: crypto.randomBytes(16).toString('base64url') } }, 'Mark');
+  await real.sync({ icalText: airbnb([['s1', '2026-11-05', '2026-11-08']]), now: NOW });
+  const r = await real.sync({ icalText: airbnb([['s1', '2026-11-05', '2026-11-08'], ['s2', '2026-11-20', '2026-11-23']]), now: NOW });
+  const [msg] = await real.push.bookingNews(r);
+  real.stop();
+  assert.equal(msg.title, 'New Airbnb booking');
+  assert.equal(msg.body, 'Guest ···1234, Fri, Nov 20 to Mon, Nov 23. Cleaning proposed for Mon, Nov 23. Tap to approve and text Jenn.');
+  assert.equal(msg.url, `/?month=2026-11&review=${r.newBookings[0].cleaning.id}`);
+  sent.length = 1;
+  assert.equal(sent.length, 1);
+});

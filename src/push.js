@@ -113,7 +113,27 @@ export function createPush({ db, config, fetchImpl = globalThis.fetch }) {
     return { sent: await send({ title, body: items.slice(0, 4).map(i => i.text).join('\n') + (items.length > 4 ? `\n+${items.length - 4} more` : ''), url: '/inbox' }), items };
   }
 
-  return { publicKey: () => vapid().publicKey, subscribe, unsubscribe, subscriptions, send, unsettled, dailyReminder, encrypt };
+  // A new Airbnb booking (or changed dates) needs Mark or Danielle to OK the cleaning and
+  // text the cleaner. Tapping opens the calendar with that cleaning's review dialog.
+  async function bookingNews({ newBookings = [], changed = [] } = {}) {
+    const cleaner = config.cleaner?.name || 'the cleaner';
+    const out = [];
+    for (const [kind, list] of [['new', newBookings], ['changed', changed]]) {
+      for (const { uid, cleaning: c, covered } of list) {
+        const b = db.prepare('SELECT * FROM bookings WHERE uid = ?').get(uid);
+        if (!b || !c) continue;
+        const stay = `${guestLabel(b)}, ${prettyDate(b.check_in)} to ${prettyDate(b.check_out)}`;
+        const body = covered ? `${stay}. Already covered by the ${prettyDate(c.date)} cleaning.`
+          : `${stay}. Cleaning proposed for ${prettyDate(c.date)}. Tap to approve and text ${cleaner}.`;
+        const msg = { title: kind === 'new' ? 'New Airbnb booking' : 'Airbnb booking dates changed', body,
+          url: covered ? `/?month=${b.check_in.slice(0, 7)}` : `/?month=${c.date.slice(0, 7)}&review=${c.id}` };
+        out.push({ ...msg, results: await send(msg) });
+      }
+    }
+    return out;
+  }
+
+  return { bookingNews, publicKey: () => vapid().publicKey, subscribe, unsubscribe, subscriptions, send, unsettled, dailyReminder, encrypt };
 }
 
 // The service worker that shows the notification and opens the app when it's tapped.
