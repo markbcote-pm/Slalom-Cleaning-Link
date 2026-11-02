@@ -621,7 +621,10 @@ export function morePage({ config, db, who, flash }) {
 ${textingCard(config, who, flash, Object.fromEntries(db.prepare("SELECT key, value FROM meta WHERE key LIKE 'consent:%'").all().map(r => [r.key.slice(8), JSON.parse(r.value)])))}
 <div class="card"><h2>Sign out</h2><p class="muted">Signs this device out. To sign out every device, change ADMIN_PASSWORD in Render.</p><form method="post" action="/logout"><button class="ghost">Sign out of this device</button></form></div>
 <div class="card"><h2>Calendar for Google, iCal and Skylight</h2><p>Subscribe to this address (Google Calendar: Other calendars, From URL):</p>
-<p><code>${h(config.baseUrl)}/feed/${h(config.feedId)}.ics</code></p><p class="muted">Only approved cleanings appear. Google refreshes subscribed calendars every few hours.</p></div>
+<p><code>${h(config.baseUrl)}/feed/${h(config.feedId)}.ics</code></p>
+<p class="muted">Shows everything the calendar here shows: every stay and every cleaning. Each title starts with the same color: stays 🔵 cleaning confirmed, 🟡 not confirmed yet, 🟠 no cleaning; cleanings 🟢 booked, 🟣 waiting on ${h(config.cleaner?.name || 'the cleaner')}, 🟡 needs OK or not sent; ⚪ past.</p>
+<p class="muted">To color stays and cleanings separately in Skylight, add them as two calendars instead:<br><code>${h(config.baseUrl)}/feed/${h(config.feedId)}.ics?only=stays</code><br><code>${h(config.baseUrl)}/feed/${h(config.feedId)}.ics?only=cleanings</code></p>
+<p class="muted">Google and Skylight refresh subscribed calendars every few hours.</p></div>
 <div class="card"><h2>Messages sent</h2><div class="scroll"><table><tr><th>When</th><th>To</th><th>Message</th><th>Status</th></tr>
 ${outbox.map(o => `<tr><td class="muted">${h(new Date(o.at).toLocaleString('en-US', { timeZone: config.timezone }))}</td><td>${h(o.channel === 'group' ? 'Group' : o.to_addr)}</td><td>${h(o.body)}</td><td>${h(o.status)}${o.error ? ` <span class="muted">${h(o.error.slice(0, 80))}</span>` : ''}</td></tr>`).join('')}
 </table></div></div>`);

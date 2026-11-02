@@ -91,7 +91,8 @@ export function createApp(config, deps = {}) {
       let given = m[1];
       try { given = decodeURIComponent(given); } catch {}
       if (!config.feedToken || !(safeEq(given, config.feedId) || safeEq(given, config.feedToken))) return send(res, 404, 'Not found', 'text/plain');
-      return send(res, 200, cleaningFeed({ db, config, service }), 'text/calendar; charset=utf-8');
+      const only = ['stays', 'cleanings'].includes(url.searchParams.get('only')) ? url.searchParams.get('only') : '';
+      return send(res, 200, cleaningFeed({ db, config, service, only }), 'text/calendar; charset=utf-8');
     }
 
     // Approval links sent by text/email

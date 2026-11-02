@@ -66,6 +66,7 @@ export function buildIcal({ name, events }) {
     lines.push('BEGIN:VEVENT', `UID:${ev.uid}`, `DTSTAMP:${now}`,
       `DTSTART:${stamp(ev.start)}`, `DTEND:${stamp(ev.end)}`,
       `SUMMARY:${esc(ev.summary)}`, `DESCRIPTION:${esc(ev.description || '')}`,
+      ...(ev.color ? [`COLOR:${ev.color}`] : []), ...(ev.categories ? [`CATEGORIES:${esc(ev.categories)}`] : []),
       `SEQUENCE:${ev.sequence || 0}`, 'END:VEVENT');
   }
   lines.push('END:VCALENDAR');
