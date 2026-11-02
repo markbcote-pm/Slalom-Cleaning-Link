@@ -19,8 +19,8 @@ table{width:100%;border-collapse:collapse}td,th{padding:8px 6px;border-top:1px s
 .dows{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));font-size:12px;color:var(--muted);text-align:center;margin-bottom:4px}
 .cal{display:flex;flex-direction:column;gap:4px}
 .week{display:grid;grid-template-columns:repeat(14,minmax(0,1fr));grid-template-rows:22px 24px 24px 26px;column-gap:0;row-gap:3px;position:relative}
-.day{grid-row:1/-1;min-width:0;border:1px solid var(--line);border-radius:8px;padding:2px 5px;font-size:12px;margin:0 2px}.day.out{opacity:.45}.day.today{border-color:var(--accent);border-width:2px}.day.over{outline:2px dashed var(--accent)}
-.bar{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:12px;line-height:22px;padding:0 6px;border-radius:11px;z-index:1}
+.day{cursor:pointer;grid-row:1/-1;min-width:0;border:1px solid var(--line);border-radius:8px;padding:2px 5px;font-size:12px;margin:0 2px}.day.out{opacity:.45}.day:hover{background:var(--win)}.day[data-past]{cursor:default}.day[data-past]:hover{background:none}.day.today{border-color:var(--accent);border-width:2px}.day.over{outline:2px dashed var(--accent)}
+.bar{pointer-events:none;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:12px;line-height:22px;padding:0 6px;border-radius:11px;z-index:1}
 .stay-bar{grid-row:2;background:var(--stay);color:var(--stay-ink);font-weight:600}.stay-bar.flagged{box-shadow:inset 0 0 0 2px var(--tight-ring)}.stay-bar.cont-l{border-top-left-radius:0;border-bottom-left-radius:0}.stay-bar.cont-r{border-top-right-radius:0;border-bottom-right-radius:0}
 .win-bar{grid-row:3;background:var(--win);color:var(--win-ink);border:1px dashed var(--win-line);line-height:20px;font-size:11px}
 .win-bar.short{background:var(--pending);color:var(--pending-ink);border-color:var(--pending-ink)}.win-bar.tight{background:var(--tight);color:#fff;border:0;margin:0 4px;text-align:center;font-weight:600}
@@ -37,7 +37,9 @@ body.dragging .bar,body.dragging .chip{pointer-events:none}
 .todo{display:flex;gap:10px;align-items:flex-start;border-top:1px solid var(--line);padding:10px 0}.todo.done>div{opacity:.6;text-decoration:line-through}
 .check{width:24px;height:24px;padding:0;border-radius:6px;background:transparent;border:2px solid var(--accent);color:var(--accent);font-weight:700;line-height:1}
 details summary{cursor:pointer;font-size:13px}label{font-size:14px}
-.chip small{font-weight:400}code{word-break:break-all}
+.chip small{font-weight:400}
+dialog{border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink);padding:18px;width:min(440px,calc(100vw - 32px))}dialog::backdrop{background:rgba(0,0,0,.4)}
+.dialog-actions{display:flex;flex-direction:column;gap:8px;margin-top:12px}code{word-break:break-all}
 `;
 
 export function layout(title, body) {
@@ -116,7 +118,10 @@ function calendar(month, cleanings, bookings, tz, config, extras = { counts: {},
     let html = '';
     for (let i = 0; i < 7; i++) {
       const d = addDays(ws, i);
-      html += `<div class="day ${d.slice(0, 7) !== month ? 'out' : ''} ${d === today ? 'today' : ''}" data-date="${d}" style="grid-column:${2 * i + 1}/span 2"><b>${Number(d.slice(8))}</b></div>`;
+      const staying = bookings.some(b => b.check_in < d && d < b.check_out);
+      const turnover = bookings.some(b => b.check_out === d) && bookings.some(b => b.check_in === d);
+      const booked = live.filter(c => c.date === d).length;
+      html += `<div class="day ${d.slice(0, 7) !== month ? 'out' : ''} ${d === today ? 'today' : ''}" data-date="${d}" data-label="${h(prettyDate(d))}"${staying ? ' data-staying="1"' : ''}${turnover ? ' data-turnover="1"' : ''}${booked ? ` data-booked="${booked}"` : ''}${d < today ? ' data-past="1"' : ''} style="grid-column:${2 * i + 1}/span 2" role="button" tabindex="0" aria-label="Add a cleaning on ${h(prettyDate(d))}"><b>${Number(d.slice(8))}</b></div>`;
     }
     for (const b of bookings) {
       if (b.check_out < ws || b.check_in > we) continue;
@@ -151,8 +156,23 @@ function calendar(month, cleanings, bookings, tz, config, extras = { counts: {},
 <div class="legend"><span><i class="bar stay-bar"></i>Guests staying</span><span><i class="bar win-bar"></i>Open days to clean</span><span><i class="bar win-bar tight"></i>Same-day turnover</span><span><i class="chip approved"></i>Cleaning (✎ = notes)</span><span>⚠ Something to raise with Airbnb</span><span><i class="chip awaiting_approval"></i>Needs approval</span></div>
 <div class="dows">${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => `<div>${d}</div>`).join('')}</div>
 <div class="cal" id="cal">${weeks.join('')}</div>
-<p class="muted">Stays run from ${prettyTime(config.checkinTime)} check-in to ${prettyTime(config.checkoutTime)} checkout. Drag a cleaning to another day to move it. You'll be asked before anything is texted to the group.</p>
+<p class="muted">Stays run from ${prettyTime(config.checkinTime)} check-in to ${prettyTime(config.checkoutTime)} checkout. Tap a day to add a cleaning. Tap a cleaning to open it, or drag it to another day to move it. You'll be asked before anything is texted to the group.</p>
+<dialog id="add-dialog"><form method="post" action="/cleanings">
+<h2 id="add-title">Add a cleaning</h2><input type="hidden" name="date" id="add-date">
+<p id="add-warn" class="warn" hidden></p>
+<label for="add-note" class="muted">Note (optional)</label><textarea name="note" id="add-note" maxlength="300" placeholder="e.g. deep clean the oven" style="min-height:70px"></textarea>
+<div class="dialog-actions"><button name="arranged" value="1">Schedule, already arranged with ${h(config.cleaner?.name || 'the cleaner')}</button>
+<button class="ghost" name="arranged" value="0">Schedule and text the group</button>
+<button class="ghost" type="button" id="add-cancel">Cancel</button></div>
+<p class="muted" style="margin-bottom:0">"Already arranged" adds it without texting anyone. "Text the group" shows you the message before it goes out.</p></form></dialog>
 <script>
+const dlg=document.getElementById('add-dialog');
+function openAdd(d){if(d.dataset.past)return;document.getElementById('add-date').value=d.dataset.date;document.getElementById('add-title').textContent='Add a cleaning on '+d.dataset.label;
+const w=[];if(d.dataset.staying)w.push('Guests are staying that day.');if(d.dataset.turnover)w.push('Same-day turnover: the window is ${prettyTime(config.checkoutTime)} to ${prettyTime(config.checkinTime)}.');if(d.dataset.booked)w.push('There is already a cleaning that day.');
+const el=document.getElementById('add-warn');el.textContent=w.join(' ');el.hidden=!w.length;document.getElementById('add-note').value='';dlg.showModal();}
+document.getElementById('add-cancel').addEventListener('click',()=>dlg.close());
+dlg.addEventListener('click',e=>{if(e.target===dlg)dlg.close();});
+document.querySelectorAll('.day').forEach(d=>{d.addEventListener('click',()=>openAdd(d));d.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();openAdd(d);}});});
 let dragId=null;document.querySelectorAll('.chip[data-id]').forEach(c=>{c.addEventListener('click',()=>location.href='/cleanings/'+c.dataset.id);c.addEventListener('dragstart',e=>{dragId=c.dataset.id;e.dataTransfer.setData('text/plain',dragId);document.body.classList.add('dragging')});c.addEventListener('dragend',()=>document.body.classList.remove('dragging'))});
 document.querySelectorAll('.day').forEach(d=>{d.addEventListener('dragover',e=>{e.preventDefault();d.classList.add('over')});
 d.addEventListener('dragleave',()=>d.classList.remove('over'));
