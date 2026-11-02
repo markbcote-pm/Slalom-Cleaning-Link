@@ -82,7 +82,7 @@ ${guestsStaying ? `<p class="pill" style="display:inline-block">Heads up: guests
 ${flash ? `<div class="flash">${h(flash)}</div>` : ''}
 <form method="post"><textarea name="body">${h(m.body)}</textarea>
 <div class="row" style="margin-top:10px"><select name="by" aria-label="Who is deciding">${who}</select>
-<button name="send" value="1">Send to group</button><button class="ghost" name="send" value="test">Send me a test</button><button class="ghost" name="send" value="0">Don't send</button></div></form>
+<button name="send" value="1">Send to group</button><button class="ghost" name="send" value="test">Send me a test</button><button class="ghost" name="send" value="0">Don't send</button><a class="btn ghost" href="/inbox">Decide later</a></div></form>
 <p class="muted" style="margin-bottom:0">"Send me a test" texts this message only to the person picked above, so you can see how it reads. The group gets nothing until you press "Send to group."</p></div>`);
 }
 
@@ -350,7 +350,7 @@ ${c.note ? `<tr><th>Note</th><td>${h(c.note)}</td></tr>` : ''}</table></div>
 <h2 style="margin-top:14px">Add a note</h2>${addNoteForm(config, cleanings, c.id)}</div>
 ${todos.length ? `<div class="card"><h2>To-dos from this cleaning</h2><ul>${todos.map(t => `<li>${t.status === 'done' ? '✓ ' : ''}${h(t.title)}</li>`).join('')}</ul></div>` : ''}
 ${groupMsgs.length ? `<div class="card"><h2>Group texts</h2><table>${groupMsgs.map(g => `<tr><td><span class="pill">${{ pending: 'Waiting on you', sent: 'Sent', skipped: 'Not sent', superseded: 'Replaced' }[g.status] || h(g.status)}</span></td><td>${h(g.body)}</td>
-<td>${g.status === 'skipped' && g.id === latestId ? `<form method="post" action="/g/${g.token}"><input type="hidden" name="by" value="${h(who)}"><button class="ghost" name="send" value="undo">Undo</button></form>` : g.status === 'pending' ? `<a class="btn ghost" href="/g/${g.token}">Decide</a>` : ''}</td></tr>`).join('')}</table></div>` : ''}
+<td>${g.status === 'skipped' && g.id === latestId ? `<form method="post" action="/g/${g.token}"><input type="hidden" name="by" value="${h(who)}"><button class="ghost" name="send" value="undo">Undo</button></form>` : g.status === 'pending' ? `<a class="btn ghost" href="/?month=${c.date.slice(0, 7)}&msg=${g.token}">Decide</a>` : ''}</td></tr>`).join('')}</table></div>` : ''}
 ${c.status === 'declined' ? `<div class="card"><p>This cleaning was marked not needed.</p><form method="post" action="/cleanings/${c.id}/restore"><button class="ghost">Undo, put it back for approval</button></form></div>` : ''}
 <div class="card"><h2>History</h2><table>${events.map(e => `<tr><td class="muted" style="white-space:nowrap">${h(when(e.at, config.timezone))}</td><td><b>${h(e.stage)}</b> ${h(e.detail || '')}</td></tr>`).join('')}</table></div>`);
 }
@@ -394,7 +394,7 @@ function decisionsList({ db, service, who }) {
   const pendingMsgs = db.prepare("SELECT g.*, c.date FROM group_messages g JOIN cleanings c ON c.id = g.cleaning_id WHERE g.status='pending' ORDER BY g.created_at").all();
   const awaiting = db.prepare("SELECT * FROM cleanings WHERE status='awaiting_approval' ORDER BY date").all();
   return [
-    ...pendingMsgs.map(m => `<tr><td>${h(prettyDate(m.date))}</td><td><span class="pill">Text the group?</span> ${h(m.body)}</td><td><a class="btn" href="/g/${m.token}?by=${encodeURIComponent(who)}">Decide</a></td></tr>`),
+    ...pendingMsgs.map(m => `<tr><td>${h(prettyDate(m.date))}</td><td><span class="pill">Text the group?</span> ${h(m.body)}</td><td><a class="btn" href="/?month=${m.date.slice(0, 7)}&msg=${m.token}">Decide</a></td></tr>`),
     ...awaiting.map(c => `<tr><td>${h(prettyDate(c.date))}</td><td><span class="pill">Needs approval</span> ${h(service.describe(c))}</td><td><a class="btn" href="/?month=${c.date.slice(0, 7)}&review=${c.id}">Review</a></td></tr>`),
   ];
 }
@@ -413,8 +413,33 @@ function clearedList({ db, today, who }) {
   ].join('');
 }
 
+// "Text the group?" as a dialog over the calendar. "Decide later" just closes it and the
+// draft stays in Waiting on you.
+function groupDialog({ db, config, m, who, note }) {
+  const c = db.prepare('SELECT * FROM cleanings WHERE id = ?').get(m.cleaning_id);
+  const staying = !['cancelled', 'declined'].includes(c.status)
+    && db.prepare("SELECT 1 FROM bookings WHERE status='active' AND check_in < ? AND check_out > ?").get(c.date, c.date);
+  const opts = config.approvers.map(a => `<option ${a.name === who ? 'selected' : ''}>${h(a.name)}</option>`).join('');
+  return `<dialog id="msg-dialog"><form method="post" action="/g/${m.token}"><input type="hidden" name="ui" value="dialog">
+<h2>Text the group?</h2>
+<p class="muted">Cleaning on ${h(prettyDate(c.date))} is <b>${h(c.status.replace('_', ' '))}</b>. ${h(config.cleaner?.name || 'Your cleaner')} goes by the group text, so nothing is sent unless you say so.</p>
+${staying ? `<p class="warn">Heads up: guests are staying at the house on ${h(prettyDate(c.date))}.</p>` : ''}
+${note ? `<div class="flash">${h(note)}</div>` : ''}
+<textarea name="body" style="min-height:110px" aria-label="Message">${h(m.body)}</textarea>
+<label class="muted" style="display:block;margin-top:8px">Deciding as <select name="by">${opts}</select></label>
+<div class="dialog-actions"><button name="send" value="1">Send to group</button>
+<button class="ghost" name="send" value="test">Send me a test</button>
+<button class="ghost" name="send" value="0">Don't send</button>
+<button class="ghost" type="button" id="msg-later">Decide later</button></div>
+<p class="muted" style="margin-bottom:0">"Decide later" keeps the text waiting under Waiting on you. "Send me a test" texts it only to the person picked above.</p></form></dialog>
+<script>{const d=document.getElementById('msg-dialog');const clean=()=>{const u=new URL(location.href);u.searchParams.delete('msg');u.searchParams.delete('msgnote');history.replaceState(null,'',u)};
+document.getElementById('msg-later').addEventListener('click',()=>d.close());d.addEventListener('close',clean);d.showModal();}</script>`;
+}
+
 // Home: just the calendar, with one line for anything that needs attention.
-export function dashboard({ config, service, db, month, who, flash, review }) {
+export function dashboard({ config, service, db, month, who, flash, review, msg, msgnote }) {
+  const pendingMsg = msg ? db.prepare('SELECT * FROM group_messages WHERE token = ?').get(msg) : null;
+  if (pendingMsg && pendingMsg.status !== 'pending' && !flash) flash = pendingMsg.status === 'sent' ? 'That text was already sent to the group.' : 'That text was already decided.';
   const { today, cleanings, bookings } = pageData({ config, service, db, month });
   const lastSync = JSON.parse(db.prepare("SELECT value FROM meta WHERE key='last_sync'").get()?.value || 'null');
   const waiting = decisionsList({ db, service, who }).length;
@@ -428,7 +453,8 @@ export function dashboard({ config, service, db, month, who, flash, review }) {
 <form method="post" action="/sync"><button class="ghost small">Check Airbnb now</button></form></div>
 ${flash ? `<div class="flash">${h(flash)}</div>` : ''}
 ${alerts.length ? `<div class="alerts">${alerts.join('')}</div>` : ''}
-<div class="card">${calendar(month, cleanings, bookings, config.timezone, config, { ...calendarExtras(db), review: reviewFor(service, review) })}</div>`);
+<div class="card">${calendar(month, cleanings, bookings, config.timezone, config, { ...calendarExtras(db), review: reviewFor(service, review) })}</div>
+${pendingMsg?.status === 'pending' ? groupDialog({ db, config, m: pendingMsg, who, note: msgnote }) : ''}`);
 }
 
 export function inboxPage({ config, service, db, who }) {
