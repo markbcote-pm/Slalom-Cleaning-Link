@@ -43,6 +43,7 @@ body.dragging .bar,body.dragging .chip{pointer-events:none}
 .topbar{display:flex;justify-content:space-between;align-items:center;gap:8px}.topbar h1{display:inline;margin:0 8px 0 0}.test-badge{text-decoration:none;font-size:12px;padding:2px 8px;border-radius:99px;background:var(--pending);color:var(--pending-ink);vertical-align:middle}
 .toolbar{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:10px;font-size:13px}button.small{padding:5px 10px;font-size:13px}
 .brand,.topbar h1.brand{display:inline-flex;align-items:center;gap:8px;vertical-align:middle}.brand img{border-radius:22%;flex:none}
+[hidden]{display:none!important}
 .flash{margin-top:10px;padding:8px 12px;border-radius:8px;background:var(--chip);color:var(--chip-ink);font-size:14px}.alerts{display:flex;flex-wrap:wrap;gap:4px 16px;margin-top:8px;font-size:14px}
 .card:has(#cal){margin-top:10px}
 .tabs{display:flex;gap:2px;margin:10px 0 0;border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:none;white-space:nowrap}.tab{padding:8px 12px;white-space:nowrap;color:var(--muted);text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px}.tab.on{color:var(--ink);border-color:var(--accent);font-weight:600}
@@ -617,10 +618,52 @@ ${missing.length ? `<tr><th>Missing in Render</th><td class="warn">${missing.joi
 <form method="post" action="/texting/test" class="row" style="margin-top:10px"><button ${config.dryRun || !me?.phone ? 'disabled' : ''}>Send me a test text</button><span class="muted">${me?.phone ? `Goes only to ${h(me.name)} at ${h(me.phone)}, then checks it was delivered.` : 'No phone number on file for you.'}</span></form></div>`;
 }
 
-export function morePage({ config, db, who, flash }) {
+function pushCard(push, flash) {
+  const subs = push.subscriptions();
+  const items = push.unsettled();
+  return `<div class="card" id="push"><h2>Phone notifications</h2>
+<p>Every morning at 9, phones with notifications on get one alert if any cleaning in the next 7 days isn't set yet: still needs your OK, not sent, waiting on the cleaner to confirm, or a stay with no cleaning before it. Tapping it opens Waiting on you.</p>
+${flash && /notification/i.test(flash) ? `<p class="flash">${h(flash)}</p>` : ''}
+<p class="muted">Right now: ${items.length ? h(items.map(i => i.text).join('; ')) : 'nothing in the next 7 days needs you.'}</p>
+<p class="muted">Turned on for ${subs.length ? h(subs.map(s => s.who).join(', ')) : 'no devices yet'}.</p>
+<div class="row"><button type="button" id="push-on">Turn on for this phone</button><button type="button" class="ghost" id="push-off" hidden>Turn off for this phone</button>
+<form method="post" action="/push/test" style="display:inline"><button class="ghost">Send a test notification</button></form></div>
+<p class="muted" id="push-status"></p>
+<script>
+(() => {
+  const on = document.getElementById('push-on'), off = document.getElementById('push-off'), status = document.getElementById('push-status');
+  const say = (t) => { status.textContent = t; };
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) { on.disabled = true; say("This browser can't get notifications. On Android use Chrome; on iPhone, add the site to your home screen first and open it from there."); return; }
+  const key = '${push.publicKey()}';
+  const toBytes = (s) => { const b = atob(s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - s.length % 4) % 4)); return Uint8Array.from(b, c => c.charCodeAt(0)); };
+  const post = (url, data) => fetch(url, { method: 'POST', body: new URLSearchParams(data), credentials: 'same-origin' });
+  navigator.serviceWorker.register('/sw.js').then(reg => reg.pushManager.getSubscription()).then(sub => {
+    if (sub) { on.hidden = true; off.hidden = false; say('Notifications are on for this phone.'); }
+  });
+  on.onclick = async () => {
+    try {
+      if (await Notification.requestPermission() !== 'granted') return say("Notifications are blocked. Allow them for this site in your phone's settings, then try again.");
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: toBytes(key) });
+      const r = await post('/push/subscribe', { sub: JSON.stringify(sub) });
+      if (!r.ok) throw new Error('server said ' + r.status);
+      on.hidden = true; off.hidden = false; say('Done. Notifications are on for this phone. Try "Send a test notification".');
+    } catch (e) { say('Could not turn on notifications: ' + e.message); }
+  };
+  off.onclick = async () => {
+    const reg = await navigator.serviceWorker.ready; const sub = await reg.pushManager.getSubscription();
+    if (sub) { await post('/push/unsubscribe', { endpoint: sub.endpoint }); await sub.unsubscribe(); }
+    on.hidden = false; off.hidden = true; say('Notifications are off for this phone.');
+  };
+})();
+</script></div>`;
+}
+
+export function morePage({ config, db, who, flash, push }) {
   const outbox = db.prepare('SELECT * FROM outbox ORDER BY id DESC LIMIT 40').all();
   return layout('More', `${header({ config, db, who, active: 'more' })}
-${textingCard(config, who, flash, Object.fromEntries(db.prepare("SELECT key, value FROM meta WHERE key LIKE 'consent:%'").all().map(r => [r.key.slice(8), JSON.parse(r.value)])))}
+${textingCard(config, who, flash && !/notification/i.test(flash) ? flash : '', Object.fromEntries(db.prepare("SELECT key, value FROM meta WHERE key LIKE 'consent:%'").all().map(r => [r.key.slice(8), JSON.parse(r.value)])))}
+${push ? pushCard(push, flash) : ''}
 <div class="card"><h2>Sign out</h2><p class="muted">Signs this device out. To sign out every device, change ADMIN_PASSWORD in Render.</p><form method="post" action="/logout"><button class="ghost">Sign out of this device</button></form></div>
 <div class="card"><h2>Calendar for Google, iCal and Skylight</h2><p>Subscribe to this address (Google Calendar: Other calendars, From URL):</p>
 <p><code>${h(config.baseUrl)}/feed/${h(config.feedId)}.ics</code></p>
