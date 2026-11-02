@@ -48,6 +48,12 @@ export function createApp(config, deps = {}) {
   const wantsJson = (req) => (req.headers.accept || '').includes('application/json');
   const after = (req, res, to) => wantsJson(req) ? send(res, 200, JSON.stringify({ redirect: to }), 'application/json') : redirect(res, to);
 
+  // Where to decide on a drafted group text: a dialog over that cleaning's month.
+  const msgUrl = (tok, extra = '') => {
+    const gm = db.prepare('SELECT g.token, c.date FROM group_messages g JOIN cleanings c ON c.id = g.cleaning_id WHERE g.token = ?').get(tok);
+    return gm ? `/?month=${gm.date.slice(0, 7)}&msg=${gm.token}${extra}` : '/inbox';
+  };
+
   async function handle(req, res) {
     const url = new URL(req.url, 'http://x');
     const p = url.pathname;
@@ -91,10 +97,23 @@ export function createApp(config, deps = {}) {
       }
       const body = await readBody(req);
       const by = validName(body.get('by'));
+      const inApp = authed(req);
       if (body.get('send') === 'undo') {
         const u = service.undoSkip(m[1], by);
-        if (u.error) return send(res, 409, messagePage('Can\'t undo', u.error, authed(req) ? '<p><a class="btn" href="/inbox">Waiting on you</a></p>' : ''));
-        return redirect(res, `/g/${m[1]}?by=${encodeURIComponent(by)}`);
+        if (u.error) return send(res, 409, messagePage('Can\'t undo', u.error, inApp ? '<p><a class="btn" href="/inbox">Waiting on you</a></p>' : ''));
+        return redirect(res, inApp ? msgUrl(m[1]) : `/g/${m[1]}?by=${encodeURIComponent(by)}`);
+      }
+      if (inApp && body.get('ui') === 'dialog') {
+        if (body.get('send') === 'test') {
+          const t = await service.testGroupMessage(m[1], by, body.get('body'));
+          const note = t.error || `Test sent only to ${t.to.name}.${t.dryRun ? ' Texting is in test mode, so it was logged on the More tab instead.' : ''} The group got nothing.`;
+          return redirect(res, msgUrl(m[1], `&msgnote=${encodeURIComponent(note)}`));
+        }
+        const r = await service.decideGroupMessage(m[1], body.get('send') === '1', by, body.get('body'));
+        if (r.error) return redirect(res, '/?flash=' + encodeURIComponent(r.error));
+        const month = msgUrl(m[1]).match(/month=([\d-]+)/)?.[1] || '';
+        const msg = r.already ? 'That text was already decided.' : r.message.status === 'sent' ? 'Sent to the group text.' : 'Not sent. To change your mind, use Undo under Waiting on you, Recently cleared.';
+        return redirect(res, `/?month=${month}&flash=${encodeURIComponent(msg)}`);
       }
       if (body.get('send') === 'test') {
         const t = await service.testGroupMessage(m[1], by, body.get('body'));
@@ -147,7 +166,7 @@ export function createApp(config, deps = {}) {
 
     if (req.method === 'GET' && p === '/') {
       const month = /^\d{4}-\d{2}$/.test(url.searchParams.get('month') || '') ? url.searchParams.get('month') : todayIn(config.timezone).slice(0, 7);
-      return send(res, 200, dashboard({ config, service, db, month, who, flash: url.searchParams.get('flash'), review: Number(url.searchParams.get('review')) || null }));
+      return send(res, 200, dashboard({ config, service, db, month, who, flash: url.searchParams.get('flash'), review: Number(url.searchParams.get('review')) || null, msg: url.searchParams.get('msg'), msgnote: url.searchParams.get('msgnote') }));
     }
     if (req.method === 'GET' && p === '/notes') return send(res, 200, notesPage({ config, db, who }));
     if (req.method === 'GET' && p === '/inbox') return send(res, 200, inboxPage({ config, service, db, who }));
@@ -183,7 +202,7 @@ export function createApp(config, deps = {}) {
         return back(`Declined the ${prettyDate(c.date)} cleaning. Nothing was texted.`);
       }
       const r = await service.approveProposal(c.id, who, { alreadyArranged: body.get('arranged') === '1', note: (body.get('note') || '').trim().slice(0, 300) });
-      if (r.message) return redirect(res, `/g/${r.message.token}?by=${encodeURIComponent(who)}`);
+      if (r.message) return redirect(res, msgUrl(r.message.token));
       return back(`Cleaning approved for ${prettyDate(c.date)}. Nothing was texted.`);
     }
     if (p === '/cleanings') {
@@ -192,7 +211,7 @@ export function createApp(config, deps = {}) {
       const r = await service.addManual(date, (body.get('note') || '').slice(0, 300), who, { alreadyArranged: body.get('arranged') === '1' });
       const extra = (r.replaced ? ` It replaces the ${prettyDate(r.replaced.date)} cleaning that was waiting for approval.` : '')
         + (r.conflict ? ` Heads up: a cleaning on ${prettyDate(r.conflict.date)} is already scheduled for this turnover.` : '');
-      if (r.message) return redirect(res, `/g/${r.message.token}?by=${encodeURIComponent(who)}`);
+      if (r.message) return redirect(res, msgUrl(r.message.token));
       return redirect(res, `/?month=${date.slice(0, 7)}&flash=${encodeURIComponent(`Cleaning scheduled for ${prettyDate(date)}. Nothing was texted.${extra}`)}`);
     }
     m = p.match(/^\/cleanings\/(\d+)\/restore$/);
@@ -217,7 +236,7 @@ export function createApp(config, deps = {}) {
         const text = (body.get('body') || '').trim() || `Reminder: cleaning ${service.describe(c)}`;
         r = { message: await service.customGroupMessage(id, text, who) };
       }
-      if (r.message) return after(req, res, `/g/${r.message.token}?by=${encodeURIComponent(who)}`);
+      if (r.message) return after(req, res, msgUrl(r.message.token));
       return after(req, res, `/?month=${service.get(id).date.slice(0, 7)}&flash=${encodeURIComponent(m[2] === 'move' ? `Moved to ${prettyDate(service.get(id).date)}. The group hadn't been told about it yet, so there was nothing to send.` : 'Done.')}`);
     }
     if (p === '/notes') {
@@ -251,7 +270,7 @@ export function createApp(config, deps = {}) {
         : p.endsWith('/delete') ? await service.removePersonalStay(uid, who)
         : await service.updatePersonalStay(uid, fields);
       if (r.error) return redirect(res, `/stays?flash=${encodeURIComponent(r.error)}#personal`);
-      if (r.message) return redirect(res, `/g/${r.message.token}?by=${encodeURIComponent(who)}`);
+      if (r.message) return redirect(res, msgUrl(r.message.token));
       const clash = r.clash?.length ? ` Heads up: it overlaps ${r.clash.map(b => `${b.guest_name || 'a booking'} (${prettyDate(b.check_in)} to ${prettyDate(b.check_out)})`).join(', ')}.` : '';
       const msg = p.endsWith('/delete') ? 'Personal stay removed.'
         : `Personal stay saved.${r.cleaning ? ` A cleaning on ${prettyDate(r.cleaning.date)} is waiting for your OK under "Waiting on you".` : r.covering ? ` The ${prettyDate(r.covering.date)} cleaning already covers it.` : ''}${clash}`;

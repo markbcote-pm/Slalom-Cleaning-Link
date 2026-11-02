@@ -201,9 +201,9 @@ test('HTTP: dashboard needs password, feed needs token, approval page works, dra
 
     const mv = await fetch(`${base}/cleanings/${c.id}/move`, { method: 'POST', headers: { ...auth, Accept: 'application/json' }, body: new URLSearchParams({ date: '2026-11-09' }) });
     const { redirect } = await mv.json();
-    assert.match(redirect, /^\/g\//);
+    assert.match(redirect, /^\/\?month=2026-11&msg=[\w-]+$/);
     const decide = await (await fetch(base + redirect, { headers: auth })).text();
-    assert.match(decide, /Text the group about this change/);
+    assert.match(decide, /<dialog id="msg-dialog">[\s\S]*Decide later/);
   } finally { app.stop(); }
 });
 
@@ -447,7 +447,7 @@ test('Review on the calendar: approve without texting, approve and text after pr
 
     // Text the group: approved, but the message waits for the preview step.
     r = await post({ proposal: c2.id, arranged: '0' });
-    assert.match(r.headers.get('location'), /^\/g\//);
+    assert.match(r.headers.get('location'), /^\/\?month=2026-11&msg=/);
     assert.equal(app.service.get(c2.id).status, 'approved');
     assert.equal(outbox().filter(o => o.channel !== 'email').length, 0, 'nothing sent until the preview is confirmed');
 
@@ -543,5 +543,31 @@ test('Undo a skipped group text and a "not needed" cleaning', async () => {
     const rs = await fetch(`${base}/cleanings/${p.id}/restore`, { method: 'POST', headers: auth, redirect: 'manual' });
     assert.match(rs.headers.get('location'), new RegExp(`review=${p.id}`));
     assert.equal(app.service.get(p.id).status, 'awaiting_approval');
+  } finally { app.stop(); }
+});
+
+test('Group text dialog: decide later keeps it pending; test and send come back to the calendar', async () => {
+  const { app, outbox, clearOutbox } = setup();
+  await new Promise(r => app.server.listen(0, r));
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const auth = { Authorization: 'Basic ' + Buffer.from('x:pw').toString('base64') };
+  const post = (tok, fields) => fetch(`${base}/g/${tok}`, { method: 'POST', headers: auth, body: new URLSearchParams({ ui: 'dialog', by: 'Mark', ...fields }), redirect: 'manual' });
+  try {
+    const add = await fetch(base + '/cleanings', { method: 'POST', headers: auth, body: new URLSearchParams({ date: '2026-11-23', arranged: '0' }), redirect: 'manual' });
+    const loc = add.headers.get('location');
+    const tok = loc.match(/msg=([\w-]+)/)[1];
+    // "Decide later" is just closing the dialog: still pending, still in Waiting on you.
+    assert.equal(app.db.prepare('SELECT status FROM group_messages WHERE token = ?').get(tok).status, 'pending');
+    assert.match(await (await fetch(base + '/inbox', { headers: auth })).text(), new RegExp(`href="/\\?month=2026-11&msg=${tok}">Decide<`));
+    clearOutbox();
+    let r = await post(tok, { send: 'test' });
+    assert.match(decodeURIComponent(r.headers.get('location')), /msg=.*&msgnote=Test sent only to Mark/);
+    assert.match(await (await fetch(base + r.headers.get('location'), { headers: auth })).text(), /<dialog id="msg-dialog">[\s\S]*Test sent only to Mark/);
+    r = await post(tok, { send: '1' });
+    assert.match(decodeURIComponent(r.headers.get('location')), /^\/\?month=2026-11&flash=Sent to the group text\./);
+    assert.equal(outbox().filter(o => o.channel === 'sms' && /New cleaning request/.test(o.body) && !/TEST/.test(o.body)).length, 3);
+    const after = await (await fetch(`${base}/?month=2026-11&msg=${tok}`, { headers: auth })).text();
+    assert.doesNotMatch(after, /<dialog id="msg-dialog">/);
+    assert.match(after, /already sent/);
   } finally { app.stop(); }
 });
