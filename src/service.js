@@ -40,11 +40,11 @@ export function createService({ db, config, notifier }) {
 
   // ---- Approval of a new cleaning ------------------------------------------------
 
-  async function requestApproval(c, reason = 'New booking') {
+  async function requestApproval(c, reason = 'New booking', { text = true } = {}) {
     const t = token();
     c = update(c.id, { status: 'awaiting_approval', approval_token: t });
     logEvent(c.id, 'Approval requested', reason);
-    await notifier.approvers(`Approve cleaning ${prettyDate(c.date)}?`, (p) =>
+    if (text) await notifier.approvers(`Approve cleaning ${prettyDate(c.date)}?`, (p) =>
       `${reason}: cleaning needed ${describe(c)} Approve or decline: ${link(`/a/${t}?by=${encodeURIComponent(p.name)}`)}`);
     return c;
   }
@@ -216,6 +216,62 @@ export function createService({ db, config, notifier }) {
     return askAboutGroupMessage(get(id), 'custom', body);
   }
 
+  // ---- Personal stays ---------------------------------------------------------------------
+  // Airbnb only shows these as blocked dates, so they're entered here. Each one gets a cleaning
+  // proposed for the departure day (unless one is already scheduled before the next arrival).
+
+  function overlaps(checkIn, checkOut, exceptUid = '') {
+    return db.prepare("SELECT * FROM bookings WHERE status='active' AND uid != ? AND check_in < ? AND check_out > ?").all(exceptUid, checkOut, checkIn);
+  }
+
+  async function proposeCleaningAfter(b, by) {
+    const nextIn = db.prepare("SELECT check_in FROM bookings WHERE status='active' AND check_in >= ? AND uid != ? ORDER BY check_in LIMIT 1").get(b.check_out, b.uid)?.check_in;
+    const covering = cleaningInWindow(b.check_out, nextIn);
+    if (covering) {
+      if (!covering.booking_uid) update(covering.id, { booking_uid: b.uid });
+      return { covering };
+    }
+    const r = db.prepare(`INSERT INTO cleanings (booking_uid, source, date, status, sequence, created_at, updated_at)
+      VALUES (?, 'personal', ?, 'awaiting_approval', 0, ?, ?)`).run(b.uid, b.check_out, nowIso(), nowIso());
+    const c = get(Number(r.lastInsertRowid));
+    logEvent(c.id, 'Booked', `After ${b.guest_name || 'a personal stay'}, ${prettyDate(b.check_in)} to ${prettyDate(b.check_out)} (added by ${by})`);
+    // Whoever added the stay is at the dashboard, so it goes on the "Waiting on you" list instead of a text.
+    return { cleaning: await requestApproval(c, 'Personal stay', { text: false }) };
+  }
+
+  async function addPersonalStay({ checkIn, checkOut, name, by }) {
+    if (!(checkOut > checkIn)) return { error: 'The departure date has to be after the arrival date.' };
+    const uid = `personal-${crypto.randomBytes(6).toString('hex')}`;
+    const clash = overlaps(checkIn, checkOut);
+    db.prepare(`INSERT INTO bookings (uid, check_in, check_out, summary, description, status, first_seen, last_seen, guest_name, source)
+      VALUES (?,?,?,?,?, 'active', ?, ?, ?, 'personal')`).run(uid, checkIn, checkOut, 'Personal stay', `Personal stay added by ${by}`, nowIso(), nowIso(), (name || '').trim().slice(0, 60) || 'Personal stay');
+    const b = db.prepare('SELECT * FROM bookings WHERE uid = ?').get(uid);
+    return { booking: b, clash, ...(await proposeCleaningAfter(b, by)) };
+  }
+
+  async function updatePersonalStay(uid, { checkIn, checkOut, name, by }) {
+    const b = db.prepare("SELECT * FROM bookings WHERE uid = ? AND source = 'personal'").get(uid);
+    if (!b) return { error: 'Stay not found.' };
+    if (!(checkOut > checkIn)) return { error: 'The departure date has to be after the arrival date.' };
+    db.prepare('UPDATE bookings SET check_in = ?, check_out = ?, guest_name = ?, last_seen = ? WHERE uid = ?')
+      .run(checkIn, checkOut, (name || '').trim().slice(0, 60) || b.guest_name, nowIso(), uid);
+    const c = db.prepare('SELECT * FROM cleanings WHERE booking_uid = ?').get(uid);
+    let moved = null;
+    // Follow the new departure date unless the cleaning was moved to some other day by hand.
+    if (c && c.date === b.check_out && checkOut !== b.check_out) moved = await move(c.id, checkOut, by);
+    else if (!c) await proposeCleaningAfter(db.prepare('SELECT * FROM bookings WHERE uid = ?').get(uid), by);
+    return { booking: db.prepare('SELECT * FROM bookings WHERE uid = ?').get(uid), clash: overlaps(checkIn, checkOut, uid), message: moved?.message };
+  }
+
+  async function removePersonalStay(uid, by) {
+    const b = db.prepare("SELECT * FROM bookings WHERE uid = ? AND source = 'personal'").get(uid);
+    if (!b) return { error: 'Stay not found.' };
+    db.prepare("UPDATE bookings SET status = 'cancelled' WHERE uid = ?").run(uid);
+    const c = db.prepare('SELECT * FROM cleanings WHERE booking_uid = ?').get(uid);
+    const r = c && c.source === 'personal' ? await cancel(c.id, by) : {};
+    return { message: r.message };
+  }
+
   // ---- Payment tracking ---------------------------------------------------------------
 
   // The day after an approved cleaning it counts as cleaned. With a fixed CLEANING_FEE the fee
@@ -273,7 +329,7 @@ export function createService({ db, config, notifier }) {
   }
 
   return {
-    get, list, stageOf, describe, windowFor, cleaningInWindow, requestApproval, approve, decline, decideGroupMessage, addManual, move, cancel,
+    get, list, stageOf, describe, windowFor, cleaningInWindow, addPersonalStay, updatePersonalStay, removePersonalStay, requestApproval, approve, decline, decideGroupMessage, addManual, move, cancel,
     customGroupMessage, autoComplete, recordPaymentRequest, markPaid, logEvent, update,
   };
 }

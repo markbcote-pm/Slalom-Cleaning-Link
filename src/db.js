@@ -99,6 +99,7 @@ export function openDb(config) {
   // Migrations for databases created by earlier versions
   const cols = db.prepare('PRAGMA table_info(bookings)').all().map(c => c.name);
   if (!cols.includes('guest_name')) db.exec('ALTER TABLE bookings ADD COLUMN guest_name TEXT');
+  if (!cols.includes('source')) db.exec("ALTER TABLE bookings ADD COLUMN source TEXT NOT NULL DEFAULT 'airbnb'");  // airbnb | personal
   return db;
 }
 

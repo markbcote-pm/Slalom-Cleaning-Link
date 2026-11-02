@@ -133,7 +133,7 @@ export function createApp(config, deps = {}) {
     }
     if (req.method === 'GET' && p === '/notes') return send(res, 200, notesPage({ config, db, who }));
     if (req.method === 'GET' && p === '/inbox') return send(res, 200, inboxPage({ config, service, db, who }));
-    if (req.method === 'GET' && p === '/stays') return send(res, 200, staysPage({ config, service, db, who }));
+    if (req.method === 'GET' && p === '/stays') return send(res, 200, staysPage({ config, service, db, who, flash: url.searchParams.get('flash') }));
     if (req.method === 'GET' && p === '/payments') return send(res, 200, paymentsPage({ config, db, who }));
     if (req.method === 'GET' && p === '/more') return send(res, 200, morePage({ config, db, who }));
     if (req.method === 'GET' && p === '/todos') return send(res, 200, todosPage({ config, db, who }));
@@ -205,6 +205,21 @@ export function createApp(config, deps = {}) {
     if (m) {
       notes.setTodo(Number(m[1]), body.get('done') === '1', who);
       return redirect(res, '/todos');
+    }
+    if (p === '/personal' || /^\/personal\/[\w-]+(\/delete)?$/.test(p)) {
+      const uid = p.split('/')[2];
+      const fields = { checkIn: body.get('check_in'), checkOut: body.get('check_out'), name: body.get('name'), by: who };
+      if (!p.endsWith('/delete') && (!isDate(fields.checkIn) || !isDate(fields.checkOut))) return redirect(res, '/stays?flash=Pick+both+dates#personal');
+      const r = p === '/personal' ? await service.addPersonalStay(fields)
+        : p.endsWith('/delete') ? await service.removePersonalStay(uid, who)
+        : await service.updatePersonalStay(uid, fields);
+      if (r.error) return redirect(res, `/stays?flash=${encodeURIComponent(r.error)}#personal`);
+      if (r.message) return redirect(res, `/g/${r.message.token}?by=${encodeURIComponent(who)}`);
+      const clash = r.clash?.length ? ` Heads up: it overlaps ${r.clash.map(b => `${b.guest_name || 'a booking'} (${prettyDate(b.check_in)} to ${prettyDate(b.check_out)})`).join(', ')}.` : '';
+      const msg = p.endsWith('/delete') ? 'Personal stay removed.'
+        : `Personal stay saved.${r.cleaning ? ` A cleaning on ${prettyDate(r.cleaning.date)} is waiting for your OK under "Waiting on you".` : r.covering ? ` The ${prettyDate(r.covering.date)} cleaning already covers it.` : ''}${clash}`;
+      const month = (fields.checkIn || '').slice(0, 7);
+      return redirect(res, `/?${isDate(fields.checkIn) ? `month=${month}&` : ''}flash=${encodeURIComponent(msg)}`);
     }
     if (p === '/bookings/name') {
       db.prepare('UPDATE bookings SET guest_name = ? WHERE uid = ?').run((body.get('name') || '').trim().slice(0, 60) || null, body.get('uid') || '');

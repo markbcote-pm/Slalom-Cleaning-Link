@@ -64,7 +64,7 @@ export async function syncAirbnb({ db, config, service, fetchImpl = globalThis.f
 
   // Bookings that vanished from the feed were cancelled. A feed with no events at all
   // while we expect future stays is treated as a glitch, not mass cancellation.
-  const future = db.prepare("SELECT * FROM bookings WHERE status='active' AND check_out >= ?").all(today);
+  const future = db.prepare("SELECT * FROM bookings WHERE status='active' AND source='airbnb' AND check_out >= ?").all(today);
   const missing = future.filter(b => !seen.has(b.uid));
   if (missing.length && (reservations.length > 0 || missing.length < 2)) {
     for (const b of missing) {
