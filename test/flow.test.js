@@ -416,3 +416,47 @@ test('personal stays: cleaning proposed for departure day, survives Airbnb sync,
   assert.equal(rm.message, undefined);
   assert.equal(app.service.get(r.cleaning.id).status, 'cancelled');
 });
+
+test('Review on the calendar: approve without texting, approve and text after preview, or decline', async () => {
+  const { app, sync, outbox, clearOutbox } = setup();
+  await new Promise(r => app.server.listen(0, r));
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const auth = { Authorization: 'Basic ' + Buffer.from('x:pw').toString('base64') };
+  const post = (fields) => fetch(base + '/cleanings', { method: 'POST', headers: auth, body: new URLSearchParams(fields), redirect: 'manual' });
+  try {
+    await sync([['s1', '2026-11-05', '2026-11-08'], ['s2', '2026-11-12', '2026-11-15'], ['s3', '2026-11-20', '2026-11-22']]);
+    const [c1, c2, c3] = app.db.prepare('SELECT * FROM cleanings ORDER BY date').all();
+    clearOutbox();
+
+    const inbox = await (await fetch(base + '/inbox', { headers: auth })).text();
+    assert.match(inbox, new RegExp(`href="/\\?month=2026-11&review=${c1.id}">Review<`));
+    const cal = await (await fetch(`${base}/?month=2026-11&review=${c1.id}`, { headers: auth })).text();
+    assert.match(cal, /class="day\s+review" data-date="2026-11-08"/);
+    assert.match(cal, new RegExp(`const review=\\{"id":${c1.id},"date":"2026-11-08"`));
+
+    // Already arranged: approved, nothing texted.
+    let r = await post({ proposal: c1.id, arranged: '1', note: 'Bring extra towels' });
+    assert.match(r.headers.get('location'), /Nothing\+was\+texted|Nothing%20was%20texted/);
+    let c = app.service.get(c1.id);
+    assert.equal(c.status, 'approved');
+    assert.equal(c.source, 'airbnb');
+    assert.equal(c.group_known_date, '2026-11-08');
+    assert.equal(c.note, 'Bring extra towels');
+    assert.equal(outbox().length, 0);
+
+    // Text the group: approved, but the message waits for the preview step.
+    r = await post({ proposal: c2.id, arranged: '0' });
+    assert.match(r.headers.get('location'), /^\/g\//);
+    assert.equal(app.service.get(c2.id).status, 'approved');
+    assert.equal(outbox().filter(o => o.channel !== 'email').length, 0, 'nothing sent until the preview is confirmed');
+
+    // Not needed: declined, nothing texted.
+    r = await post({ proposal: c3.id, action: 'decline' });
+    assert.equal(app.service.get(c3.id).status, 'declined');
+    assert.equal(outbox().length, 0);
+
+    // A stale Review link just says it was handled.
+    r = await post({ proposal: c1.id, arranged: '1' });
+    assert.match(decodeURIComponent(r.headers.get('location')), /already approved/);
+  } finally { app.stop(); }
+});

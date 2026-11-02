@@ -129,7 +129,7 @@ export function createApp(config, deps = {}) {
 
     if (req.method === 'GET' && p === '/') {
       const month = /^\d{4}-\d{2}$/.test(url.searchParams.get('month') || '') ? url.searchParams.get('month') : todayIn(config.timezone).slice(0, 7);
-      return send(res, 200, dashboard({ config, service, db, month, who, flash: url.searchParams.get('flash') }));
+      return send(res, 200, dashboard({ config, service, db, month, who, flash: url.searchParams.get('flash'), review: Number(url.searchParams.get('review')) || null }));
     }
     if (req.method === 'GET' && p === '/notes') return send(res, 200, notesPage({ config, db, who }));
     if (req.method === 'GET' && p === '/inbox') return send(res, 200, inboxPage({ config, service, db, who }));
@@ -154,6 +154,19 @@ export function createApp(config, deps = {}) {
         const r = await sync();
         return redirect(res, '/?flash=' + encodeURIComponent(r.skipped || `Airbnb checked: ${r.total} bookings, ${r.added} new cleanings proposed, ${r.covered || 0} already covered by a scheduled cleaning, ${r.moved} moved, ${r.cancelled} cancelled.${r.warning ? ' ' + r.warning : ''}`));
       } catch (e) { return redirect(res, '/?flash=' + encodeURIComponent('Could not read the Airbnb calendar: ' + e.message)); }
+    }
+    if (p === '/cleanings' && body.get('proposal')) {
+      const c = service.get(Number(body.get('proposal')));
+      if (!c) return redirect(res, '/?flash=' + encodeURIComponent('That cleaning no longer exists.'));
+      const back = (msg) => redirect(res, `/?month=${c.date.slice(0, 7)}&flash=${encodeURIComponent(msg)}`);
+      if (c.status !== 'awaiting_approval') return back(`The ${prettyDate(c.date)} cleaning was already ${c.status === 'declined' ? 'declined' : 'approved'}.`);
+      if (body.get('action') === 'decline') {
+        await service.decline(c.approval_token, who);
+        return back(`Declined the ${prettyDate(c.date)} cleaning. Nothing was texted.`);
+      }
+      const r = await service.approveProposal(c.id, who, { alreadyArranged: body.get('arranged') === '1', note: (body.get('note') || '').trim().slice(0, 300) });
+      if (r.message) return redirect(res, `/g/${r.message.token}?by=${encodeURIComponent(who)}`);
+      return back(`Cleaning approved for ${prettyDate(c.date)}. Nothing was texted.`);
     }
     if (p === '/cleanings') {
       const date = body.get('date');
