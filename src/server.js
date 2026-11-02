@@ -236,7 +236,7 @@ export function createApp(config, deps = {}) {
     }
     if (p === '/bookings/name') {
       db.prepare('UPDATE bookings SET guest_name = ? WHERE uid = ?').run((body.get('name') || '').trim().slice(0, 60) || null, body.get('uid') || '');
-      return redirect(res, '/stays');
+      return wantsJson(req) ? send(res, 200, JSON.stringify({ ok: true }), 'application/json') : redirect(res, '/stays');
     }
     if (p === '/payments/request') {
       const ok = service.recordPaymentRequest(Number(body.get('id')), body.get('amount'), who);
