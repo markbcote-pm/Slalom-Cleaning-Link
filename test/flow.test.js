@@ -460,3 +460,25 @@ test('Review on the calendar: approve without texting, approve and text after pr
     assert.match(decodeURIComponent(r.headers.get('location')), /already approved/);
   } finally { app.stop(); }
 });
+
+test('Send me a test: only the reviewer gets the draft, it stays pending, edits are kept', async () => {
+  const { app, outbox, clearOutbox } = setup();
+  await new Promise(r => app.server.listen(0, r));
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  try {
+    const { message } = await app.service.addManual('2026-11-20', '', 'Mark');
+    clearOutbox();
+    const r = await fetch(`${base}/g/${message.token}`, { method: 'POST', body: new URLSearchParams({ by: 'Danielle', send: 'test', body: 'CLEANING ADDED: edited text' }) });
+    const html = await r.text();
+    assert.match(html, /Test sent only to Danielle \(\+15550000002\)/);
+    assert.match(html, /CLEANING ADDED: edited text/);
+    const sent = outbox();
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].channel, 'sms');
+    assert.equal(sent[0].to_addr, '+15550000002');
+    assert.match(sent[0].body, /^\[TEST, only you got this\] CLEANING ADDED: edited text/);
+    const gm = app.db.prepare('SELECT * FROM group_messages WHERE token = ?').get(message.token);
+    assert.equal(gm.status, 'pending');
+    assert.equal(gm.body, 'CLEANING ADDED: edited text');
+  } finally { app.stop(); }
+});

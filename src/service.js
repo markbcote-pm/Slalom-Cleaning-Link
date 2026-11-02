@@ -125,6 +125,22 @@ export function createService({ db, config, notifier }) {
     return db.prepare('SELECT * FROM group_messages WHERE id = ?').get(Number(r.lastInsertRowid));
   }
 
+  // "Test send": the draft goes only to the person reviewing it, so they can see how it reads
+  // on a phone. The draft stays pending and nothing reaches the group.
+  async function testGroupMessage(msgToken, by, editedBody) {
+    const m = db.prepare('SELECT * FROM group_messages WHERE token = ?').get(msgToken);
+    if (!m) return { error: 'This link is not valid any more.' };
+    const person = config.approvers.find(a => a.name === by);
+    if (!person || (!person.phone && !person.email)) return { error: `No phone number on file for ${by || 'that person'}.` };
+    const body = (editedBody || m.body).trim();
+    if (editedBody && body !== m.body) db.prepare('UPDATE group_messages SET body = ? WHERE id = ?').run(body, m.id);
+    const text = `[TEST, only you got this] ${body}`;
+    if (person.phone) await notifier.sms(person.phone, text);
+    else await notifier.email(person.email, 'Test of a group text', text);
+    logEvent(m.cleaning_id, 'Test text', `Sent only to ${person.name}`);
+    return { to: person, body, dryRun: config.dryRun };
+  }
+
   async function decideGroupMessage(msgToken, send, by, editedBody) {
     const m = db.prepare('SELECT * FROM group_messages WHERE token = ?').get(msgToken);
     if (!m) return { error: 'This link is not valid any more.' };
@@ -349,7 +365,7 @@ export function createService({ db, config, notifier }) {
   }
 
   return {
-    get, list, stageOf, describe, windowFor, cleaningInWindow, addPersonalStay, updatePersonalStay, removePersonalStay, requestApproval, approve, approveProposal, decline, decideGroupMessage, addManual, move, cancel,
+    get, list, stageOf, describe, windowFor, cleaningInWindow, addPersonalStay, updatePersonalStay, removePersonalStay, requestApproval, approve, approveProposal, decline, decideGroupMessage, testGroupMessage, addManual, move, cancel,
     customGroupMessage, autoComplete, recordPaymentRequest, markPaid, logEvent, update,
   };
 }
