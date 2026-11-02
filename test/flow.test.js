@@ -483,3 +483,29 @@ test('Send me a test: only the reviewer gets the draft, it stays pending, edits 
     assert.equal(gm.body, 'CLEANING ADDED: edited text');
   } finally { app.stop(); }
 });
+
+test('Waiting on you drops proposals already covered by a confirmed cleaning (manual or approved)', async () => {
+  const { app, sync, outbox, clearOutbox } = setup();
+  await new Promise(r => app.server.listen(0, r));
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const auth = { Authorization: 'Basic ' + Buffer.from('x:pw').toString('base64') };
+  try {
+    await sync([['s1', '2026-11-05', '2026-11-08'], ['s2', '2026-11-12', '2026-11-15'], ['s3', '2026-11-20', '2026-11-22']]);
+    const [p1, p2, p3] = app.db.prepare('SELECT * FROM cleanings ORDER BY date').all();
+    assert.deepEqual([p1.date, p2.date, p3.date], ['2026-11-08', '2026-11-15', '2026-11-22']);
+    clearOutbox();
+    const ins = (date, status, source) => app.db.prepare(`INSERT INTO cleanings (source, date, status, sequence, created_at, updated_at) VALUES (?, ?, ?, 0, 'x', 'x')`).run(source, date, status);
+    ins('2026-11-10', 'approved', 'manual');            // hand-added inside the 8th-12th turnover
+    ins('2026-11-17', 'approved', 'airbnb');            // an approved cleaning inside the 15th-20th turnover
+    ins('2026-11-13', 'approved', 'manual');            // mid-stay: covers nothing
+
+    const inbox = await (await fetch(base + '/inbox', { headers: auth })).text();
+    assert.equal(app.service.get(p1.id).status, 'cancelled');
+    assert.equal(app.service.get(p2.id).status, 'cancelled');
+    assert.equal(app.service.get(p3.id).status, 'awaiting_approval', 'nothing covers the turnover after the 22nd');
+    assert.equal((inbox.match(/Needs approval/g) || []).length, 1);
+    assert.equal(outbox().length, 0, 'nothing is texted');
+    const ev = app.db.prepare("SELECT detail FROM events WHERE cleaning_id = ? AND stage = 'Cancelled'").get(p1.id);
+    assert.match(ev.detail, /Tue, Nov 10 cleaning already covers this turnover/);
+  } finally { app.stop(); }
+});

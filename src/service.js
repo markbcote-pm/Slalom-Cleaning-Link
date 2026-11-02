@@ -177,6 +177,29 @@ export function createService({ db, config, notifier }) {
       ORDER BY date LIMIT 1`).get(checkOut, end, excludeId) || null;
   }
 
+  // Drop proposals that are no longer needed: a proposed cleaning whose turnover (the prior
+  // stay's checkout to the next check-in) already has a confirmed cleaning, whether it was
+  // proposed and approved or added by hand. Nothing is texted: the group never heard of it.
+  function dropCoveredProposals(by = 'the app') {
+    const dropped = [];
+    const pending = db.prepare("SELECT * FROM cleanings WHERE status='awaiting_approval' AND group_known_date IS NULL ORDER BY date").all();
+    for (const c of pending) {
+      const prior = db.prepare("SELECT * FROM bookings WHERE status='active' AND check_out <= ? ORDER BY check_out DESC LIMIT 1").get(c.date);
+      if (!prior) continue;
+      const next = db.prepare("SELECT check_in FROM bookings WHERE status='active' AND check_in >= ? AND uid != ? ORDER BY check_in LIMIT 1").get(prior.check_out, prior.uid);
+      if (next && c.date > next.check_in) continue; // proposal isn't in a turnover window
+      const end = next ? next.check_in : addDays(prior.check_out, 14);
+      const cover = db.prepare(`SELECT * FROM cleanings WHERE status IN ('approved','completed','paid') AND date >= ? AND date <= ? AND id != ?
+        ORDER BY date LIMIT 1`).get(prior.check_out, end, c.id);
+      if (!cover) continue;
+      update(c.id, { status: 'cancelled', approval_token: null });
+      db.prepare("UPDATE group_messages SET status='superseded' WHERE cleaning_id = ? AND status='pending'").run(c.id);
+      logEvent(c.id, 'Cancelled', `Not needed: the ${prettyDate(cover.date)} cleaning already covers this turnover (checked by ${by})`);
+      dropped.push({ cleaning: c, cover });
+    }
+    return dropped;
+  }
+
   // alreadyArranged: Mark already agreed the day with the cleaner, so nothing is texted and
   // the group counts as knowing about it (later moves or cancellations still ask first).
   async function addManual(date, note, by, { alreadyArranged = false } = {}) {
@@ -365,7 +388,7 @@ export function createService({ db, config, notifier }) {
   }
 
   return {
-    get, list, stageOf, describe, windowFor, cleaningInWindow, addPersonalStay, updatePersonalStay, removePersonalStay, requestApproval, approve, approveProposal, decline, decideGroupMessage, testGroupMessage, addManual, move, cancel,
+    get, list, stageOf, describe, windowFor, cleaningInWindow, addPersonalStay, updatePersonalStay, removePersonalStay, requestApproval, approve, approveProposal, dropCoveredProposals, decline, decideGroupMessage, testGroupMessage, addManual, move, cancel,
     customGroupMessage, autoComplete, recordPaymentRequest, markPaid, logEvent, update,
   };
 }

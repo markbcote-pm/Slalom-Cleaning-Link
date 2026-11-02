@@ -76,6 +76,9 @@ export async function syncAirbnb({ db, config, service, fetchImpl = globalThis.f
     result.warning = `Airbnb feed came back empty; kept ${missing.length} bookings as-is.`;
   }
 
+  const dropped = service.dropCoveredProposals('Airbnb check');
+  if (dropped.length) result.covered = (result.covered || 0) + dropped.length;
+
   db.prepare("INSERT INTO meta (key, value) VALUES ('last_sync', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
     .run(JSON.stringify({ at: stamp, ...result }));
   return result;

@@ -135,6 +135,8 @@ export function createApp(config, deps = {}) {
     // Everything below needs the dashboard password.
     if (!authed(req)) return send(res, 401, 'Login required', 'text/plain', { 'WWW-Authenticate': 'Basic realm="Cleaning Link"' });
     const who = validName(decodeURIComponent(cookie(req, 'who') || ''));
+    // Keep "Waiting on you" honest: clear proposals already covered by a confirmed cleaning.
+    if (req.method === 'GET' && ['/', '/inbox', '/stays'].includes(p)) service.dropCoveredProposals(who || 'the app');
 
     if (req.method === 'GET' && p === '/') {
       const month = /^\d{4}-\d{2}$/.test(url.searchParams.get('month') || '') ? url.searchParams.get('month') : todayIn(config.timezone).slice(0, 7);
