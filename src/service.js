@@ -151,6 +151,30 @@ export function createService({ db, config, notifier }) {
     return { to: person, body, dryRun: config.dryRun };
   }
 
+  // Undo "Don't send": the skipped draft goes back to waiting for a decision. Only the newest
+  // message for that cleaning can come back, so an older draft never overrides a later change.
+  function undoSkip(msgToken, by) {
+    const m = db.prepare('SELECT * FROM group_messages WHERE token = ?').get(msgToken);
+    if (!m) return { error: 'This message no longer exists.' };
+    if (m.status !== 'skipped') return { message: m, already: true };
+    const newer = db.prepare("SELECT 1 FROM group_messages WHERE cleaning_id = ? AND id > ? AND status IN ('pending','sent')").get(m.cleaning_id, m.id);
+    if (newer) return { error: 'A newer message for this cleaning has been drafted or sent since, so this one can\'t come back.' };
+    db.prepare("UPDATE group_messages SET status='superseded' WHERE cleaning_id = ? AND status='pending'").run(m.cleaning_id);
+    db.prepare("UPDATE group_messages SET status='pending', decided_by=NULL, decided_at=NULL WHERE id = ?").run(m.id);
+    logEvent(m.cleaning_id, 'Group message restored', `Put back in Waiting on you by ${by}`);
+    return { message: db.prepare('SELECT * FROM group_messages WHERE id = ?').get(m.id) };
+  }
+
+  // Undo "Not needed": a declined cleaning goes back to waiting for approval.
+  function restoreDeclined(id, by) {
+    const c = get(id);
+    if (!c) return { error: 'Cleaning not found.' };
+    if (c.status !== 'declined') return { cleaning: c, already: true };
+    const done = update(c.id, { status: 'awaiting_approval', approval_token: token() });
+    logEvent(c.id, 'Approval requested', `Restored by ${by} after it was declined`);
+    return { cleaning: done };
+  }
+
   async function decideGroupMessage(msgToken, send, by, editedBody) {
     const m = db.prepare('SELECT * FROM group_messages WHERE token = ?').get(msgToken);
     if (!m) return { error: 'This link is not valid any more.' };
@@ -398,7 +422,7 @@ export function createService({ db, config, notifier }) {
   }
 
   return {
-    get, list, stageOf, describe, windowFor, cleaningInWindow, addPersonalStay, updatePersonalStay, removePersonalStay, requestApproval, approve, approveProposal, dropCoveredProposals, decline, decideGroupMessage, testGroupMessage, addManual, move, cancel,
+    get, list, stageOf, describe, windowFor, cleaningInWindow, addPersonalStay, updatePersonalStay, removePersonalStay, requestApproval, approve, approveProposal, dropCoveredProposals, decline, decideGroupMessage, testGroupMessage, undoSkip, restoreDeclined, addManual, move, cancel,
     customGroupMessage, autoComplete, recordPaymentRequest, markPaid, logEvent, update,
   };
 }

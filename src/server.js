@@ -91,6 +91,11 @@ export function createApp(config, deps = {}) {
       }
       const body = await readBody(req);
       const by = validName(body.get('by'));
+      if (body.get('send') === 'undo') {
+        const u = service.undoSkip(m[1], by);
+        if (u.error) return send(res, 409, messagePage('Can\'t undo', u.error, authed(req) ? '<p><a class="btn" href="/inbox">Waiting on you</a></p>' : ''));
+        return redirect(res, `/g/${m[1]}?by=${encodeURIComponent(by)}`);
+      }
       if (body.get('send') === 'test') {
         const t = await service.testGroupMessage(m[1], by, body.get('body'));
         const fresh = db.prepare('SELECT * FROM group_messages WHERE token = ?').get(m[1]);
@@ -103,7 +108,9 @@ export function createApp(config, deps = {}) {
       const r = await service.decideGroupMessage(m[1], body.get('send') === '1', by, body.get('body'));
       if (r.error) return send(res, 404, messagePage('Link expired', r.error));
       const back = authed(req) ? '<p><a class="btn" href="/">Back to dashboard</a></p>' : '';
-      return send(res, 200, messagePage('Done', r.message.status === 'sent' ? 'Sent to the group text.' : 'OK, nothing was sent to the group.', back));
+      const undo = r.message.status === 'skipped' && !r.already
+        ? `<form method="post" style="margin-bottom:10px"><input type="hidden" name="by" value="${by.replace(/"/g, '&quot;')}"><button class="ghost" name="send" value="undo">Undo, bring the message back</button></form>` : '';
+      return send(res, 200, messagePage('Done', r.message.status === 'sent' ? 'Sent to the group text.' : 'OK, nothing was sent to the group.', undo + back));
     }
 
     // Texts coming in from Twilio: replies to the app's number, and group-thread messages.
@@ -187,6 +194,12 @@ export function createApp(config, deps = {}) {
         + (r.conflict ? ` Heads up: a cleaning on ${prettyDate(r.conflict.date)} is already scheduled for this turnover.` : '');
       if (r.message) return redirect(res, `/g/${r.message.token}?by=${encodeURIComponent(who)}`);
       return redirect(res, `/?month=${date.slice(0, 7)}&flash=${encodeURIComponent(`Cleaning scheduled for ${prettyDate(date)}. Nothing was texted.${extra}`)}`);
+    }
+    m = p.match(/^\/cleanings\/(\d+)\/restore$/);
+    if (m) {
+      const r = service.restoreDeclined(Number(m[1]), who);
+      if (r.error) return redirect(res, '/inbox');
+      return redirect(res, `/?month=${r.cleaning.date.slice(0, 7)}&review=${r.cleaning.id}`);
     }
     m = p.match(/^\/cleanings\/(\d+)\/(move|cancel|message)$/);
     if (m) {

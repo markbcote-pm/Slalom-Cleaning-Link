@@ -509,3 +509,39 @@ test('Waiting on you drops proposals already covered by a confirmed cleaning (ma
     assert.match(ev.detail, /Tue, Nov 10 cleaning already covers this turnover/);
   } finally { app.stop(); }
 });
+
+test('Undo a skipped group text and a "not needed" cleaning', async () => {
+  const { app, sync, outbox, clearOutbox } = setup();
+  await new Promise(r => app.server.listen(0, r));
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const auth = { Authorization: 'Basic ' + Buffer.from('x:pw').toString('base64') };
+  try {
+    const { message } = await app.service.addManual('2026-11-23', '', 'Mark');
+    clearOutbox();
+    const done = await (await fetch(`${base}/g/${message.token}`, { method: 'POST', body: new URLSearchParams({ by: 'Mark', send: '0' }) })).text();
+    assert.match(done, /Undo, bring the message back/);
+    let inbox = await (await fetch(base + '/inbox', { headers: auth })).text();
+    assert.match(inbox, /Recently cleared[\s\S]*Text not sent/);
+
+    const r = await fetch(`${base}/g/${message.token}`, { method: 'POST', body: new URLSearchParams({ by: 'Mark', send: 'undo' }), redirect: 'manual' });
+    assert.equal(r.status, 303);
+    assert.equal(app.db.prepare('SELECT status FROM group_messages WHERE token = ?').get(message.token).status, 'pending');
+    inbox = await (await fetch(base + '/inbox', { headers: auth })).text();
+    assert.match(inbox, /Text the group\?/);
+    assert.doesNotMatch(inbox, /Recently cleared/);
+    assert.equal(outbox().length, 0, 'undo never texts anyone');
+
+    // A newer draft blocks bringing back an older one.
+    await app.service.decideGroupMessage(message.token, false, 'Mark');
+    await app.service.customGroupMessage(app.db.prepare('SELECT cleaning_id FROM group_messages WHERE token = ?').get(message.token).cleaning_id, 'Bring the spare key', 'Mark');
+    assert.match(app.service.undoSkip(message.token, 'Mark').error, /newer message/);
+
+    // Not needed -> restore
+    await sync([['s1', '2026-12-05', '2026-12-08']]);
+    const p = app.db.prepare("SELECT * FROM cleanings WHERE status='awaiting_approval'").get();
+    await app.service.decline(p.approval_token, 'Mark');
+    const rs = await fetch(`${base}/cleanings/${p.id}/restore`, { method: 'POST', headers: auth, redirect: 'manual' });
+    assert.match(rs.headers.get('location'), new RegExp(`review=${p.id}`));
+    assert.equal(app.service.get(p.id).status, 'awaiting_approval');
+  } finally { app.stop(); }
+});
