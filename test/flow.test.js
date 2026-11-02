@@ -5,7 +5,7 @@ import { createApp } from '../src/server.js';
 import { parseIcal } from '../src/ical.js';
 import { localToUtc } from '../src/dates.js';
 import { cleaningFeed } from '../src/feed.js';
-import { cleaningWindows, guestLabel } from '../src/views.js';
+import { cleaningWindows, guestLabel, cleaningState } from '../src/views.js';
 
 const NOW = new Date('2026-11-01T18:00:00Z');
 
@@ -162,7 +162,7 @@ test('payments: done cleanings become owed, then paid', async () => {
   assert.match(outbox()[0].body, /owe Rosa \$120\.00/);
   app.service.markPaid([c.id], 'Venmo', 'Danielle');
   assert.equal(app.service.get(c.id).status, 'paid');
-  assert.deepEqual(app.service.stageOf(app.service.get(c.id)).map(s => s.done), [true, true, true, false, true, true, true]);
+  assert.deepEqual(app.service.stageOf(app.service.get(c.id)).map(s => s.done), [true, true, true, false, true, true, true, true]);
 });
 
 test('HTTP: dashboard needs password, feed needs token, approval page works, drag-move returns redirect', async () => {
@@ -186,7 +186,7 @@ test('HTTP: dashboard needs password, feed needs token, approval page works, dra
     assert.match(await (await fetch(base + '/inbox', { headers: auth })).text(), /Needs approval/);
     assert.match(html, /class="bar stay-bar ready cont-r" style="grid-column:10\/15"[^>]*>Guest ···1234</, 'Thu 5th 1 PM to Sun 8th 11 AM spans weeks: first week from Thu afternoon');
     assert.match(html, /class="bar stay-bar ready cont-l" style="grid-column:1\/2"/, 'continues into Sunday morning');
-    assert.match(html, /class="chip awaiting_approval" draggable="true" data-id="\d+" style="grid-column:1\/span 2"/);
+    assert.match(html, /class="chip cs-proposed" draggable="true" data-id="\d+" style="grid-column:1\/span 2"[^>]*><span class="l-long">Needs OK</);
     assert.match(html, /Open, no next booking yet/);
 
     const saved = await fetch(`${base}/bookings/name`, { method: 'POST', headers: { ...auth, Accept: 'application/json' }, body: new URLSearchParams({ uid: 's1', name: 'Smith family' }) });
@@ -375,11 +375,23 @@ test('stay colors: ready, pending, missing, past', () => {
     { uid: 'd', check_in: '2026-11-15', check_out: '2026-11-18' },   // gap Nov 12-15
   ];
   const cleanings = [
-    { date: '2026-11-07', status: 'approved' },          // covers b
+    { date: '2026-11-07', status: 'approved', group_known_date: '2026-11-07', cleaner_confirmed_at: 'x' }, // confirmed, covers b
     { date: '2026-11-10', status: 'awaiting_approval' },  // proposed for c
     { date: '2026-11-13', status: 'cancelled' },          // doesn't count for d
+    { date: '2026-11-19', status: 'approved', group_known_date: '2026-11-19' }, // texted, not confirmed: e is pending
   ];
-  assert.deepEqual(stayReadiness(bookings, cleanings, '2026-11-02'), { old: 'past', a: 'missing', b: 'ready', c: 'pending', d: 'missing' });
+  bookings.push({ uid: 'e', check_in: '2026-11-20', check_out: '2026-11-22' });
+  assert.deepEqual(stayReadiness(bookings, cleanings, '2026-11-02'), { old: 'past', a: 'missing', b: 'ready', c: 'pending', d: 'missing', e: 'pending' });
+  const t = '2026-11-02';
+  assert.deepEqual([
+    { date: '2026-11-05', status: 'awaiting_approval' },
+    { date: '2026-11-05', status: 'approved', group_known_date: null },
+    { date: '2026-11-05', status: 'approved', group_known_date: '2026-11-04' },
+    { date: '2026-11-05', status: 'approved', group_known_date: '2026-11-05' },
+    { date: '2026-11-05', status: 'approved', group_known_date: '2026-11-05', cleaner_confirmed_at: 'x' },
+    { date: '2026-11-01', status: 'approved', group_known_date: '2026-11-01', cleaner_confirmed_at: 'x' },
+    { date: '2026-11-05', status: 'completed' },
+  ].map(c => cleaningState(c, t)), ['proposed', 'proposed', 'proposed', 'asked', 'confirmed', 'past', 'past']);
 });
 
 test('personal stays: cleaning proposed for departure day, survives Airbnb sync, edit and remove', async () => {
@@ -569,5 +581,49 @@ test('Group text dialog: decide later keeps it pending; test and send come back 
     const after = await (await fetch(`${base}/?month=2026-11&msg=${tok}`, { headers: auth })).text();
     assert.doesNotMatch(after, /<dialog id="msg-dialog">/);
     assert.match(after, /already sent/);
+  } finally { app.stop(); }
+});
+
+test('Cleaning states: proposed -> asked after texting -> confirmed; arranged is confirmed; move resets', async () => {
+  const { app, sync } = setup();
+  await new Promise(r => app.server.listen(0, r));
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const auth = { Authorization: 'Basic ' + Buffer.from('x:pw').toString('base64') };
+  const T = '2026-11-02';
+  const state = (id) => cleaningState(app.service.get(id), T);
+  try {
+    await sync([['s1', '2026-11-05', '2026-11-08'], ['s2', '2026-11-12', '2026-11-15']]);
+    const [p1, p2] = app.db.prepare('SELECT * FROM cleanings ORDER BY date').all();
+    assert.equal(state(p1.id), 'proposed');
+
+    // Approve and text: asked, waiting on the cleaner; shows in Waiting on you.
+    const r = await app.service.approveProposal(p1.id, 'Mark', {});
+    assert.equal(state(p1.id), 'proposed', 'approved but the text is still a draft');
+    await app.service.decideGroupMessage(r.message.token, true, 'Mark');
+    assert.equal(state(p1.id), 'asked');
+    let inbox = await (await fetch(base + '/inbox', { headers: auth })).text();
+    assert.match(inbox, /Waiting on Rosa<\/span> Texted to the group/);
+    const cal = await (await fetch(base + '/?month=2026-11', { headers: auth })).text();
+    assert.match(cal, new RegExp(`class="chip cs-asked" draggable="true" data-id="${p1.id}"[^>]*><span class="l-long">Asked<`));
+
+    // Mark says Rosa confirmed.
+    const c = await fetch(`${base}/cleanings/${p1.id}/confirm`, { method: 'POST', headers: auth, body: new URLSearchParams({ back: 'inbox' }), redirect: 'manual' });
+    assert.equal(c.headers.get('location'), '/inbox');
+    assert.equal(state(p1.id), 'confirmed');
+    assert.ok(app.service.stageOf(app.service.get(p1.id)).find(s => s.name === 'Cleaner confirmed').done);
+    inbox = await (await fetch(base + '/inbox', { headers: auth })).text();
+    assert.doesNotMatch(inbox, /Waiting on Rosa/);
+
+    // Moving it means the cleaner has to OK the new day.
+    await app.service.move(p1.id, '2026-11-09', 'Mark');
+    assert.equal(state(p1.id), 'proposed', 'moved, new date not sent yet');
+
+    // Arranged directly: confirmed straight away.
+    await app.service.approveProposal(p2.id, 'Mark', { alreadyArranged: true });
+    assert.equal(state(p2.id), 'confirmed');
+    const { cleaning } = await app.service.addManual('2026-11-25', '', 'Mark', { alreadyArranged: true });
+    assert.equal(state(cleaning.id), 'confirmed');
+    // Can't confirm a date the cleaner hasn't been texted.
+    assert.match(app.service.confirmByCleaner(p1.id, 'Mark').error, /hasn't been texted/);
   } finally { app.stop(); }
 });

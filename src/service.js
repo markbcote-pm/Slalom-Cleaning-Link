@@ -6,7 +6,7 @@ const token = () => crypto.randomBytes(18).toString('base64url');
 const nowIso = () => new Date().toISOString();
 
 // Stages shown on the dashboard for every cleaning, in order.
-export const STAGES = ['Booked', 'Approval requested', 'Approved', 'Cleaner texted', 'Cleaned', 'Payment requested', 'Paid'];
+export const STAGES = ['Booked', 'Approval requested', 'Approved', 'Cleaner texted', 'Cleaner confirmed', 'Cleaned', 'Payment requested', 'Paid'];
 
 export function createService({ db, config, notifier }) {
   const link = (p) => `${config.baseUrl}${p}`;
@@ -88,8 +88,9 @@ export function createService({ db, config, notifier }) {
     c = update(c.id, { status: 'approved', approved_by: by, approved_at: nowIso(), approval_token: null, ...(note ? { note } : {}) });
     logEvent(c.id, 'Approved', `by ${by}`);
     if (alreadyArranged) {
-      c = update(c.id, { group_known_date: c.date });
+      c = update(c.id, { group_known_date: c.date, cleaner_confirmed_at: nowIso() });
       logEvent(c.id, 'Cleaner texted', `Arranged directly with ${config.cleaner?.name || 'the cleaner'}, no text sent`);
+      logEvent(c.id, 'Cleaner confirmed', 'Already arranged');
       return { cleaning: c };
     }
     const moved = prevKnown && prevKnown !== c.date;
@@ -116,7 +117,7 @@ export function createService({ db, config, notifier }) {
       .run(c.id, kind, body, 'sent', token(), by, nowIso(), nowIso());
     await notifier.group(body);
     const live = ['approved', 'completed', 'paid'].includes(get(c.id).status);
-    update(c.id, { group_notified_at: nowIso(), group_known_date: live ? get(c.id).date : null });
+    update(c.id, { group_notified_at: nowIso(), group_known_date: live ? get(c.id).date : null, ...(kind !== 'custom' ? { cleaner_confirmed_at: null } : {}) });
     logEvent(c.id, 'Cleaner texted', body);
   }
 
@@ -185,7 +186,7 @@ export function createService({ db, config, notifier }) {
       db.prepare("UPDATE group_messages SET status='sent', body=?, decided_by=?, decided_at=? WHERE id=?").run(body, by, nowIso(), m.id);
       await notifier.group(body);
       const live = ['approved', 'completed', 'paid'].includes(c.status);
-      update(c.id, { group_notified_at: nowIso(), group_known_date: live ? c.date : null });
+      update(c.id, { group_notified_at: nowIso(), group_known_date: live ? c.date : null, ...(m.kind !== 'custom' ? { cleaner_confirmed_at: null } : {}) });
       logEvent(c.id, 'Cleaner texted', body);
     } else {
       db.prepare("UPDATE group_messages SET status='skipped', decided_by=?, decided_at=? WHERE id=?").run(by, nowIso(), m.id);
@@ -268,8 +269,9 @@ export function createService({ db, config, notifier }) {
     }
 
     if (alreadyArranged) {
-      c = update(c.id, { group_known_date: date });
+      c = update(c.id, { group_known_date: date, cleaner_confirmed_at: nowIso() });
       logEvent(c.id, 'Cleaner texted', `Arranged directly with ${config.cleaner?.name || 'the cleaner'}, no text sent`);
+      logEvent(c.id, 'Cleaner confirmed', 'Already arranged');
       return { cleaning: c, replaced, conflict };
     }
     const msg = await askAboutGroupMessage(c, 'added', requestText(c));
@@ -280,7 +282,7 @@ export function createService({ db, config, notifier }) {
     const c = get(id);
     if (!c || c.date === newDate) return { cleaning: c };
     const old = c.date;
-    let moved = update(id, { date: newDate, sequence: c.sequence + 1 });
+    let moved = update(id, { date: newDate, sequence: c.sequence + 1, cleaner_confirmed_at: null });
     logEvent(id, 'Moved', `${prettyDate(old)} to ${prettyDate(newDate)}${fromAirbnb ? ' (Airbnb dates changed)' : ` by ${by}`}`);
     if (c.status === 'awaiting_approval') {
       if (fromAirbnb) moved = await requestApproval(moved, 'Booking dates changed');
@@ -303,6 +305,21 @@ export function createService({ db, config, notifier }) {
       `CLEANING CANCELLED: ${prettyDate(c.group_known_date)} at ${config.propertyName} is no longer needed.`,
       { askBy: fromAirbnb ? 'text' : 'dashboard' });
     return { cleaning: get(id), message: msg };
+  }
+
+  // The cleaner said yes to the date she was texted (marked by Mark or Danielle).
+  function confirmByCleaner(id, by, yes = true) {
+    const c = get(id);
+    if (!c) return { error: 'Cleaning not found.' };
+    if (yes) {
+      if (c.group_known_date !== c.date) return { error: `${config.cleaner?.name || 'The cleaner'} hasn't been texted this date yet.` };
+      update(id, { cleaner_confirmed_at: nowIso() });
+      logEvent(id, 'Cleaner confirmed', `Marked by ${by}`);
+    } else {
+      update(id, { cleaner_confirmed_at: null });
+      logEvent(id, 'Cleaner confirmation removed', `by ${by}`);
+    }
+    return { cleaning: get(id) };
   }
 
   async function customGroupMessage(id, body, by) {
@@ -413,7 +430,9 @@ export function createService({ db, config, notifier }) {
 
   function stageOf(c) {
     const ev = db.prepare('SELECT stage FROM events WHERE cleaning_id = ?').all(c.id).map(e => e.stage);
-    return STAGES.map(s => ({ name: s, done: s === 'Booked' ? true : ev.includes(s) || (s === 'Approval requested' && c.source === 'manual') }));
+    return STAGES.map(s => ({ name: s, done: s === 'Booked' ? true
+      : s === 'Cleaner confirmed' ? !!c.cleaner_confirmed_at || ['completed', 'paid'].includes(c.status)
+      : ev.includes(s) || (s === 'Approval requested' && c.source === 'manual') }));
   }
 
   function list({ from } = {}) {
@@ -423,6 +442,6 @@ export function createService({ db, config, notifier }) {
 
   return {
     get, list, stageOf, describe, windowFor, cleaningInWindow, addPersonalStay, updatePersonalStay, removePersonalStay, requestApproval, approve, approveProposal, dropCoveredProposals, decline, decideGroupMessage, testGroupMessage, undoSkip, restoreDeclined, addManual, move, cancel,
-    customGroupMessage, autoComplete, recordPaymentRequest, markPaid, logEvent, update,
+    customGroupMessage, confirmByCleaner, autoComplete, recordPaymentRequest, markPaid, logEvent, update,
   };
 }

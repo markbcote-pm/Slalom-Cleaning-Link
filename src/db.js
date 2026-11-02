@@ -100,6 +100,14 @@ export function openDb(config) {
   const cols = db.prepare('PRAGMA table_info(bookings)').all().map(c => c.name);
   if (!cols.includes('guest_name')) db.exec('ALTER TABLE bookings ADD COLUMN guest_name TEXT');
   if (!cols.includes('source')) db.exec("ALTER TABLE bookings ADD COLUMN source TEXT NOT NULL DEFAULT 'airbnb'");  // airbnb | personal
+  // Cleaner confirmation: set when Mark marks that Jenn said yes, or when a cleaning was
+  // arranged with her directly. Older arranged cleanings are backfilled from their history.
+  const ccols = db.prepare('PRAGMA table_info(cleanings)').all().map(c => c.name);
+  if (!ccols.includes('cleaner_confirmed_at')) {
+    db.exec('ALTER TABLE cleanings ADD COLUMN cleaner_confirmed_at TEXT');
+    db.exec(`UPDATE cleanings SET cleaner_confirmed_at = updated_at WHERE group_known_date = date AND id IN
+      (SELECT cleaning_id FROM events WHERE stage = 'Cleaner texted' AND detail LIKE 'Arranged directly%')`);
+  }
   return db;
 }
 

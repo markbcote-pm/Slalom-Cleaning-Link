@@ -214,6 +214,12 @@ export function createApp(config, deps = {}) {
       if (r.message) return redirect(res, msgUrl(r.message.token));
       return redirect(res, `/?month=${date.slice(0, 7)}&flash=${encodeURIComponent(`Cleaning scheduled for ${prettyDate(date)}. Nothing was texted.${extra}`)}`);
     }
+    m = p.match(/^\/cleanings\/(\d+)\/(confirm|unconfirm)$/);
+    if (m) {
+      const r = service.confirmByCleaner(Number(m[1]), who, m[2] === 'confirm');
+      const back = body.get('back') === 'inbox' ? '/inbox' : `/cleanings/${m[1]}`;
+      return redirect(res, r.error ? `/cleanings/${m[1]}` : back);
+    }
     m = p.match(/^\/cleanings\/(\d+)\/restore$/);
     if (m) {
       const r = service.restoreDeclined(Number(m[1]), who);
