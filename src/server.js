@@ -86,9 +86,11 @@ export function createApp(config, deps = {}) {
     if (req.method === 'GET' && (p === '/terms' || p === '/sms-terms')) return send(res, 200, termsPage(config));
 
     // Calendar feed (secret URL, no login so calendar apps can fetch it)
-    let m = p.match(/^\/feed\/([^/]+)\.ics$/);
+    let m = p.match(/^\/feed\/(.+)\.ics$/);
     if (m) {
-      if (!config.feedToken || !safeEq(m[1], config.feedToken)) return send(res, 404, 'Not found', 'text/plain');
+      let given = m[1];
+      try { given = decodeURIComponent(given); } catch {}
+      if (!config.feedToken || !(safeEq(given, config.feedId) || safeEq(given, config.feedToken))) return send(res, 404, 'Not found', 'text/plain');
       return send(res, 200, cleaningFeed({ db, config, service }), 'text/calendar; charset=utf-8');
     }
 

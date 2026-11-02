@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -37,6 +38,9 @@ export function loadConfig(overrides = {}) {
     cleaningFeeCents: Math.round(Number(e.CLEANING_FEE || 0) * 100),
     adminPassword: e.ADMIN_PASSWORD || '',
     feedToken: e.FEED_TOKEN || '',
+    // Render's generated FEED_TOKEN can contain "/", "+" and "=", which break calendar apps.
+    // The URL uses a letters-and-digits id derived from it instead.
+    feedId: e.FEED_TOKEN ? crypto.createHash('sha256').update(e.FEED_TOKEN).digest('hex').slice(0, 32) : '',
     approvers,
     cleaner,
     groupMembers: [...approvers, ...(cleaner ? [cleaner] : [])],
