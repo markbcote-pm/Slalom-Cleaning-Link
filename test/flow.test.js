@@ -171,7 +171,10 @@ test('HTTP: dashboard needs password, feed needs token, approval page works, dra
   const base = `http://127.0.0.1:${app.server.address().port}`;
   const auth = { Authorization: 'Basic ' + Buffer.from('x:pw').toString('base64') };
   try {
-    assert.equal((await fetch(base + '/')).status, 401);
+    const noLogin = await fetch(base + '/', { redirect: 'manual' });
+    assert.equal(noLogin.status, 303);
+    assert.equal(noLogin.headers.get('location'), '/login');
+    assert.equal((await fetch(base + '/sync', { method: 'POST' })).status, 401);
     assert.equal((await fetch(base + '/feed/wrong.ics')).status, 404);
     assert.equal((await fetch(base + '/feed/feedtok.ics')).status, 200);
     await sync([['s1', '2026-11-05', '2026-11-08']]);
@@ -736,5 +739,45 @@ test('Jenn texting back "yes" confirms the cleaning she was asked about', async 
     assert.deepEqual([state(b), state(d)], ['confirmed', 'confirmed']);
     // Its own text still lands in Notes.
     assert.ok(app.db.prepare("SELECT 1 FROM notes WHERE body = 'Yes for Feb 21'").get());
+  } finally { app.stop(); }
+});
+
+test('Sign-in page: remember this device keeps a signed cookie; wrong tries are limited; password change signs out', async () => {
+  const mk = (pw) => createApp(loadConfig({ DOTENV: '0', DB_FILE: ':memory:', DRY_RUN: '1', ADMIN_PASSWORD: pw, APPROVERS: 'Mark:+12075550000:', CLEANER: 'Jenn:', BASE_URL: 'https://app.example' }));
+  const app = mk('slalom');
+  await new Promise(r => app.server.listen(0, r));
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const login = (password, extra = {}) => fetch(base + '/login', { method: 'POST', redirect: 'manual', body: new URLSearchParams({ password, ...extra }) });
+  try {
+    const go = await fetch(base + '/stays?x=1', { redirect: 'manual' });
+    assert.equal(go.headers.get('location'), '/login?next=%2Fstays%3Fx%3D1');
+    const page = await (await fetch(base + '/login?next=/stays')).text();
+    assert.match(page, /name="remember" value="1" checked/);
+
+    assert.equal((await login('nope')).status, 401);
+    const ok = await login('slalom', { remember: '1', next: '/stays' });
+    assert.equal(ok.status, 303);
+    assert.equal(ok.headers.get('location'), '/stays');
+    const set = ok.headers.get('set-cookie');
+    assert.match(set, /cl_session=\d+\.[\w-]+; Path=\/; HttpOnly; SameSite=Lax; Secure; Max-Age=31536000/);
+    const jar = { cookie: set.split(';')[0] };
+    assert.equal((await fetch(base + '/stays', { headers: jar })).status, 200);
+    // Without "remember", the cookie ends with the browser session.
+    assert.doesNotMatch((await login('slalom')).headers.get('set-cookie'), /Max-Age/);
+    // Open redirects are refused.
+    assert.equal((await login('slalom', { next: '//evil.example' })).headers.get('location'), '/');
+    // Tampered or old-password cookies don't work.
+    const [exp] = jar.cookie.split('=')[1].split('.');
+    assert.equal((await fetch(base + '/stays', { headers: { cookie: `cl_session=${Number(exp) + 1}.${jar.cookie.split('.')[1]}` }, redirect: 'manual' })).status, 303);
+    const other = mk('changed');
+    await new Promise(r => other.server.listen(0, r));
+    try {
+      assert.equal((await fetch(`http://127.0.0.1:${other.server.address().port}/stays`, { headers: jar, redirect: 'manual' })).status, 303);
+    } finally { other.stop(); }
+    // Sign out clears the cookie.
+    assert.match((await fetch(base + '/logout', { method: 'POST', redirect: 'manual' })).headers.get('set-cookie'), /cl_session=; .*Max-Age=0/);
+    // Ten wrong tries lock out even the right password for a while.
+    for (let i = 0; i < 10; i++) await login('guess' + i);
+    assert.equal((await login('slalom')).status, 429);
   } finally { app.stop(); }
 });

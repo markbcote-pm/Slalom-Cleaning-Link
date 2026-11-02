@@ -8,7 +8,7 @@ import { createService } from './service.js';
 import { syncAirbnb } from './sync.js';
 import { cleaningFeed } from './feed.js';
 import { isDate, todayIn, prettyDate, localToUtc } from './dates.js';
-import { layout, messagePage, approvalPage, groupDecisionPage, dashboard, notesPage, todosPage, cleaningPage, inboxPage, staysPage, paymentsPage, morePage } from './views.js';
+import { layout, messagePage, approvalPage, groupDecisionPage, dashboard, notesPage, todosPage, cleaningPage, inboxPage, staysPage, paymentsPage, morePage, loginPage } from './views.js';
 import { createNotes, validTwilioSignature } from './notes.js';
 import { smsInfoPage, privacyPage, termsPage, confirmationText } from './policy.js';
 
@@ -24,13 +24,33 @@ export function createApp(config, deps = {}) {
     return x.length === y.length && crypto.timingSafeEqual(x, y);
   };
 
+  // Signed-in devices carry a cookie "<expiry>.<signature>". The signature is keyed on the
+  // password, so changing ADMIN_PASSWORD in Render signs every device out.
+  const SESSION = 'cl_session';
+  const sign = (exp) => crypto.createHmac('sha256', 'cleaning-link:' + config.adminPassword).update(String(exp)).digest('base64url');
+  const sessionCookie = (remember) => {
+    const exp = Date.now() + (remember ? 365 : 1) * 86400e3;
+    const secure = (config.baseUrl || '').startsWith('https:') ? '; Secure' : '';
+    return `${SESSION}=${exp}.${sign(exp)}; Path=/; HttpOnly; SameSite=Lax${secure}${remember ? '; Max-Age=31536000' : ''}`;
+  };
   function authed(req) {
     if (!config.adminPassword) return false;
+    const [exp, sig] = (cookie(req, SESSION) || '').split('.');
+    if (exp && sig && Number(exp) > Date.now() && safeEq(sig, sign(exp))) return true;
     const m = (req.headers.authorization || '').match(/^Basic (.+)$/);
     if (!m) return false;
     const pass = Buffer.from(m[1], 'base64').toString().split(':').slice(1).join(':');
     return safeEq(pass, config.adminPassword);
   }
+  // A simple password needs a brake on guessing: 10 wrong tries locks that address out for 15 minutes.
+  const failures = new Map();
+  const clientIp = (req) => String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+  const lockedOut = (ip) => { const f = failures.get(ip); return f && f.count >= 10 && Date.now() - f.first < 15 * 60e3; };
+  const noteFailure = (ip) => {
+    const f = failures.get(ip);
+    if (!f || Date.now() - f.first >= 15 * 60e3) failures.set(ip, { count: 1, first: Date.now() }); else f.count++;
+  };
+  const safeNext = (n) => /^\/(?!\/)[^\s]*$/.test(n || '') && !n.startsWith('/login') ? n : '/';
 
   const readBody = (req) => new Promise((resolve, reject) => {
     let data = '';
@@ -166,7 +186,27 @@ export function createApp(config, deps = {}) {
     }
 
     // Everything below needs the dashboard password.
-    if (!authed(req)) return send(res, 401, 'Login required', 'text/plain', { 'WWW-Authenticate': 'Basic realm="Cleaning Link"' });
+    if (p === '/login') {
+      if (req.method === 'POST') {
+        const b = await readBody(req);
+        const ip = clientIp(req);
+        const next = safeNext(b.get('next'));
+        if (lockedOut(ip)) return send(res, 429, loginPage({ next, error: 'Too many wrong tries. Wait 15 minutes and try again.' }));
+        if (!config.adminPassword || !safeEq(b.get('password') || '', config.adminPassword)) {
+          noteFailure(ip);
+          return send(res, 401, loginPage({ next, error: config.adminPassword ? "That password didn't match." : 'No password is set yet. Add ADMIN_PASSWORD in Render.', remember: b.get('remember') === '1' }));
+        }
+        failures.delete(ip);
+        return redirect(res, next, { 'Set-Cookie': sessionCookie(b.get('remember') === '1') });
+      }
+      if (authed(req)) return redirect(res, safeNext(url.searchParams.get('next')));
+      return send(res, 200, loginPage({ next: safeNext(url.searchParams.get('next')) }));
+    }
+    if (p === '/logout' && req.method === 'POST') return redirect(res, '/login', { 'Set-Cookie': `${SESSION}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0` });
+    if (!authed(req)) {
+      if (req.method === 'GET' && !wantsJson(req)) return redirect(res, '/login' + (p === '/' && !url.search ? '' : '?next=' + encodeURIComponent(p + url.search)));
+      return send(res, 401, 'Login required', 'text/plain');
+    }
     const who = validName(decodeURIComponent(cookie(req, 'who') || ''));
     // Keep "Waiting on you" honest: clear proposals already covered by a confirmed cleaning.
     if (req.method === 'GET' && ['/', '/inbox', '/stays'].includes(p)) service.dropCoveredProposals(who || 'the app');

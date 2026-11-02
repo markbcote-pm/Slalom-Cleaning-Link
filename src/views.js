@@ -66,6 +66,16 @@ export function messagePage(title, text, extra = '') {
   return layout(title, `<div class="card"><h1>${h(title)}</h1><p>${h(text)}</p>${extra}</div>`);
 }
 
+export function loginPage({ next = '/', error = '', remember = true } = {}) {
+  return layout('Sign in', `<div class="card" style="max-width:380px;margin:12vh auto 0"><h1>Cleaning Link</h1>
+${error ? `<p class="flash">${h(error)}</p>` : ''}
+<form method="post" action="/login"><input type="hidden" name="next" value="${h(next)}">
+<label>Password<br><input type="password" name="password" autocomplete="current-password" autofocus required style="width:100%"></label>
+<p><label><input type="checkbox" name="remember" value="1" ${remember ? 'checked' : ''}> Remember this device</label></p>
+<button style="width:100%">Sign in</button></form>
+<p class="muted">With "Remember this device" on, you stay signed in on this phone or computer for a year. Changing the password signs every device out.</p></div>`);
+}
+
 export function approvalPage(c, describe, token, by, approvers) {
   if (c.status !== 'awaiting_approval') {
     return messagePage('Already handled', `This cleaning is ${c.status.replace('_', ' ')}${c.approved_by ? ` (by ${c.approved_by})` : ''}.`);
@@ -609,6 +619,7 @@ export function morePage({ config, db, who, flash }) {
   const outbox = db.prepare('SELECT * FROM outbox ORDER BY id DESC LIMIT 40').all();
   return layout('More', `${header({ config, db, who, active: 'more' })}
 ${textingCard(config, who, flash, Object.fromEntries(db.prepare("SELECT key, value FROM meta WHERE key LIKE 'consent:%'").all().map(r => [r.key.slice(8), JSON.parse(r.value)])))}
+<div class="card"><h2>Sign out</h2><p class="muted">Signs this device out. To sign out every device, change ADMIN_PASSWORD in Render.</p><form method="post" action="/logout"><button class="ghost">Sign out of this device</button></form></div>
 <div class="card"><h2>Calendar for Google, iCal and Skylight</h2><p>Subscribe to this address (Google Calendar: Other calendars, From URL):</p>
 <p><code>${h(config.baseUrl)}/feed/${h(config.feedToken)}.ics</code></p><p class="muted">Only approved cleanings appear. Google refreshes subscribed calendars every few hours.</p></div>
 <div class="card"><h2>Messages sent</h2><div class="scroll"><table><tr><th>When</th><th>To</th><th>Message</th><th>Status</th></tr>
