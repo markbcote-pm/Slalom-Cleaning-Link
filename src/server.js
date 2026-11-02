@@ -172,7 +172,7 @@ export function createApp(config, deps = {}) {
     if (req.method === 'GET' && p === '/inbox') return send(res, 200, inboxPage({ config, service, db, who }));
     if (req.method === 'GET' && p === '/stays') return send(res, 200, staysPage({ config, service, db, who, flash: url.searchParams.get('flash') }));
     if (req.method === 'GET' && p === '/payments') return send(res, 200, paymentsPage({ config, db, who }));
-    if (req.method === 'GET' && p === '/more') return send(res, 200, morePage({ config, db, who }));
+    if (req.method === 'GET' && p === '/more') return send(res, 200, morePage({ config, db, who, flash: url.searchParams.get('flash') }));
     if (req.method === 'GET' && p === '/todos') return send(res, 200, todosPage({ config, db, who }));
     m = p.match(/^\/cleanings\/(\d+)$/);
     if (req.method === 'GET' && m) {
@@ -213,6 +213,25 @@ export function createApp(config, deps = {}) {
         + (r.conflict ? ` Heads up: a cleaning on ${prettyDate(r.conflict.date)} is already scheduled for this turnover.` : '');
       if (r.message) return redirect(res, msgUrl(r.message.token));
       return redirect(res, `/?month=${date.slice(0, 7)}&flash=${encodeURIComponent(`Cleaning scheduled for ${prettyDate(date)}. Nothing was texted.${extra}`)}`);
+    }
+    if (p === '/texting/test') {
+      const me = config.approvers.find(a => a.name === who);
+      const back = (msg) => redirect(res, `/more?flash=${encodeURIComponent(msg)}#texting`);
+      if (config.dryRun) return back('Texting is in test mode (DRY_RUN), so nothing was sent.');
+      if (!me?.phone) return back(`No phone number on file for ${who}.`);
+      const r = await notifier.sms(me.phone, `Cleaning Link test text for ${me.name}. If you got this, texting works.`);
+      if (!r?.sid) {
+        const last = db.prepare("SELECT status, error FROM outbox WHERE channel='sms' ORDER BY id DESC LIMIT 1").get();
+        return back(last?.status === 'held' ? `Held: ${me.phone} isn't in SMS_ONLY_TO.` : `Twilio refused it: ${twilioHint(last?.error)}`);
+      }
+      // Carriers can reject a text after Twilio accepts it, so look again a few seconds later.
+      let st = r;
+      for (let i = 0; i < 4 && ['queued', 'accepted', 'sending'].includes(st.status); i++) {
+        await new Promise(ok => setTimeout(ok, deps.testPollMs ?? 2000));
+        try { st = await notifier.smsStatus(r.sid); } catch { break; }
+      }
+      if (st.error_code) return back(`Twilio accepted it but it failed (${st.status}): ${twilioHint(`code ${st.error_code}`)}`);
+      return back(st.status === 'delivered' ? `Delivered to ${me.phone}. Texting works.` : `Twilio says "${st.status}". It should arrive shortly; if not, check the Messages sent list below.`);
     }
     m = p.match(/^\/cleanings\/(\d+)\/(confirm|unconfirm)$/);
     if (m) {
@@ -302,6 +321,25 @@ export function createApp(config, deps = {}) {
   function localInputToIso(v) {
     const mm = v.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
     return mm ? localToUtc(mm[1], mm[2], config.timezone).toISOString() : undefined;
+  }
+
+  // Plain-English hints for the Twilio errors people hit when first setting up.
+  function twilioHint(err = '') {
+    const code = (String(err).match(/(?:"code"\s*:\s*|code )(\d{5})/) || [])[1];
+    const hints = {
+      20003: 'the Account SID or Auth Token is wrong (20003).',
+      21211: 'the phone number is not valid (21211).',
+      21606: 'TWILIO_FROM is not a number on your Twilio account that can send texts (21606).',
+      21608: 'a trial Twilio account can only text numbers you have verified in Twilio (21608). Verify your number under Phone Numbers > Verified Caller IDs, or upgrade the account.',
+      21610: 'that number replied STOP. Text START to the Twilio number to opt back in (21610).',
+      30032: 'the toll-free number has not been verified yet (30032). Finish toll-free verification in the Twilio console.',
+      30034: 'US carriers block texts from numbers without A2P 10DLC registration (30034). Register the number under Messaging > Regulatory Compliance in Twilio.',
+      30007: 'the carrier filtered it as spam (30007).',
+      30003: 'the phone was unreachable (30003).',
+      30005: 'the number does not exist (30005).',
+      30006: 'the number cannot receive texts, e.g. a landline (30006).',
+    };
+    return hints[code] || String(err || 'unknown error').slice(0, 200);
   }
 
   function validName(n) {

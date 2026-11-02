@@ -627,3 +627,43 @@ test('Cleaning states: proposed -> asked after texting -> confirmed; arranged is
     assert.match(app.service.confirmByCleaner(p1.id, 'Mark').error, /hasn't been texted/);
   } finally { app.stop(); }
 });
+
+test('Live texting with SMS_ONLY_TO: only Mark gets real texts; test-text button reports delivery or the Twilio problem', async () => {
+  const calls = [];
+  let fail = null;
+  const fetchImpl = async (url, opts = {}) => {
+    calls.push({ url, body: opts.body ? String(opts.body) : null });
+    const json = (o, status = 200) => ({ ok: status < 300, status, json: async () => o, text: async () => JSON.stringify(o) });
+    if (url.endsWith('/Messages.json')) return json({ sid: 'SM' + calls.length, status: 'queued' }, 201);
+    if (/\/Messages\/SM\d+\.json$/.test(url)) return json(fail ? { status: 'undelivered', error_code: fail } : { status: 'delivered', error_code: null });
+    return json({}, 404);
+  };
+  const config = loadConfig({ DOTENV: '0', DB_FILE: ':memory:', DRY_RUN: '0', ADMIN_PASSWORD: 'pw', TWILIO_ACCOUNT_SID: 'ACtest', TWILIO_AUTH_TOKEN: 'tok', TWILIO_FROM: '+15550009999',
+    APPROVERS: 'Mark:+12076512735:,Danielle:+18319150656:', CLEANER: 'Jenn:+19734193202', SMS_ONLY_TO: '207-651-2735', BASE_URL: 'http://test' });
+  const app = createApp(config, { fetchImpl, testPollMs: 1 });
+  await new Promise(r => app.server.listen(0, r));
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const auth = { Authorization: 'Basic ' + Buffer.from('x:pw').toString('base64'), Cookie: 'who=Mark' };
+  try {
+    const { message } = await app.service.addManual('2026-11-20', '', 'Mark');
+    await app.service.decideGroupMessage(message.token, true, 'Mark');
+    const out = app.db.prepare("SELECT to_addr, status FROM outbox WHERE channel='sms' ORDER BY id").all().map(o => ({ ...o }));
+    assert.deepEqual(out, [
+      { to_addr: '+12076512735', status: 'sent' },
+      { to_addr: '+18319150656', status: 'held' },
+      { to_addr: '+19734193202', status: 'held' },
+    ]);
+    assert.equal(calls.filter(c => c.url.endsWith('/Messages.json')).length, 1, 'only one real Twilio send');
+    assert.match(calls[0].body, /To=%2B12076512735/);
+
+    const more = await (await fetch(base + '/more', { headers: auth })).text();
+    assert.match(more, /Live, safety switch on\.<\/b> Real texts go only to \(207\) 651-2735/);
+    assert.match(more, /http:\/\/test\/twilio\/sms/);
+
+    let r = await fetch(base + '/texting/test', { method: 'POST', headers: auth, redirect: 'manual' });
+    assert.match(decodeURIComponent(r.headers.get('location')), /Delivered to \+12076512735\. Texting works\./);
+    fail = 30034;
+    r = await fetch(base + '/texting/test', { method: 'POST', headers: auth, redirect: 'manual' });
+    assert.match(decodeURIComponent(r.headers.get('location')), /A2P 10DLC registration \(30034\)/);
+  } finally { app.stop(); }
+});

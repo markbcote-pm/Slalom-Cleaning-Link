@@ -40,7 +40,7 @@ body.dragging .bar,body.dragging .chip{pointer-events:none}
 .legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted);margin:0 0 6px;align-items:center}.legend b{color:var(--ink)}.legend span{display:flex;align-items:center;gap:6px}.legend i{display:inline-block;width:22px;height:12px;padding:0;margin:0;line-height:0}
 @media (max-width:640px){.cal-help{font-size:13px}.bar{font-size:10px;padding:0 3px}.chip{font-size:10px;margin:0 1px;padding:2px 2px}.day{margin:0 1px;padding:1px 3px}.hide-sm{display:none}}
 .scroll{overflow-x:auto}
-.topbar{display:flex;justify-content:space-between;align-items:center;gap:8px}.topbar h1{display:inline;margin:0 8px 0 0}.test-badge{font-size:12px;padding:2px 8px;border-radius:99px;background:var(--pending);color:var(--pending-ink);vertical-align:middle}
+.topbar{display:flex;justify-content:space-between;align-items:center;gap:8px}.topbar h1{display:inline;margin:0 8px 0 0}.test-badge{text-decoration:none;font-size:12px;padding:2px 8px;border-radius:99px;background:var(--pending);color:var(--pending-ink);vertical-align:middle}
 .toolbar{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:10px;font-size:13px}button.small{padding:5px 10px;font-size:13px}
 .flash{margin-top:10px;padding:8px 12px;border-radius:8px;background:var(--chip);color:var(--chip-ink);font-size:14px}.alerts{display:flex;flex-wrap:wrap;gap:4px 16px;margin-top:8px;font-size:14px}
 .card:has(#cal){margin-top:10px}
@@ -291,7 +291,7 @@ export function header({ config, db, who, active }) {
     + db.prepare("SELECT COUNT(*) n FROM cleanings WHERE status='approved' AND group_known_date = date AND cleaner_confirmed_at IS NULL AND date >= ?").get(todayIn(config.timezone)).n;
   const badge = (n) => n ? ` <span class="count">${n}</span>` : '';
   const tab = (key, href, label) => `<a class="tab ${active === key ? 'on' : ''}" href="${href}">${label}</a>`;
-  return `<div class="topbar"><div><h1>Cleaning Link</h1>${config.dryRun ? '<span class="test-badge">Test mode</span>' : ''}</div>
+  return `<div class="topbar"><div><h1>Cleaning Link</h1>${config.dryRun ? '<a class="test-badge" href="/more#texting">Test mode</a>' : config.smsOnlyTo?.length ? '<a class="test-badge" href="/more#texting">Texts: safety switch on</a>' : ''}</div>
 <form method="post" action="/who" class="row"><label class="muted hide-sm">You are</label><select name="name" onchange="this.form.submit()" aria-label="You are">${whoSel}</select></form></div>
 <nav class="tabs">${tab('calendar', '/', 'Calendar')}${tab('inbox', '/inbox', `Waiting on you${badge(waiting)}`)}${tab('stays', '/stays', 'Stays')}${tab('todos', '/todos', `To-do${badge(openTodos)}`)}${tab('notes', '/notes', 'Notes')}${tab('payments', '/payments', 'Payments')}${tab('more', '/more', 'More')}</nav>`;
 }
@@ -581,9 +581,27 @@ ${owed.length ? `<h2 style="margin-top:14px">Requested, not paid yet</h2><form m
 ${recentPaid ? `<h2 style="margin-top:14px">Recently paid</h2><table>${recentPaid}</table>` : ''}</div>`);
 }
 
-export function morePage({ config, db, who }) {
+function textingCard(config, who, flash = '') {
+  const me = config.approvers.find(a => a.name === who) || config.approvers[0];
+  const only = config.smsOnlyTo || [];
+  const fmt = (d) => `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
+  const mode = config.dryRun
+    ? `<b>Test mode.</b> Nothing is really sent; messages are only listed below. ${!config.twilio.sid ? 'TWILIO_ACCOUNT_SID is missing.' : 'Set DRY_RUN=0 to go live.'}`
+    : only.length ? `<b>Live, safety switch on.</b> Real texts go only to ${only.map(fmt).join(', ')}. Everyone else's texts are held and listed below.`
+    : '<b>Live.</b> Texts go to everyone in the group.';
+  const missing = ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_FROM'].filter(k => !{ TWILIO_ACCOUNT_SID: config.twilio.sid, TWILIO_AUTH_TOKEN: config.twilio.token, TWILIO_FROM: config.twilio.from }[k]);
+  return `<div class="card" id="texting"><h2>Texting</h2>${flash ? `<div class="flash" style="margin:0 0 10px">${h(flash)}</div>` : ''}<p>${mode}</p>
+<table><tr><th>Sends from</th><td>${h(config.twilio.from || 'not set')}</td></tr>
+<tr><th>Group texts</th><td>${config.groupMode === 'conversation' ? 'One shared group thread (Twilio Conversations)' : 'Same text sent to each person separately'}</td></tr>
+<tr><th>Replies come in at</th><td><code>${h(config.baseUrl)}/twilio/sms</code><div class="muted">Paste this into your Twilio number's "A message comes in" webhook (HTTP POST).</div></td></tr>
+${missing.length ? `<tr><th>Missing in Render</th><td class="warn">${missing.join(', ')}</td></tr>` : ''}</table>
+<form method="post" action="/texting/test" class="row" style="margin-top:10px"><button ${config.dryRun || !me?.phone ? 'disabled' : ''}>Send me a test text</button><span class="muted">${me?.phone ? `Goes only to ${h(me.name)} at ${h(me.phone)}, then checks it was delivered.` : 'No phone number on file for you.'}</span></form></div>`;
+}
+
+export function morePage({ config, db, who, flash }) {
   const outbox = db.prepare('SELECT * FROM outbox ORDER BY id DESC LIMIT 40').all();
   return layout('More', `${header({ config, db, who, active: 'more' })}
+${textingCard(config, who, flash)}
 <div class="card"><h2>Calendar for Google, iCal and Skylight</h2><p>Subscribe to this address (Google Calendar: Other calendars, From URL):</p>
 <p><code>${h(config.baseUrl)}/feed/${h(config.feedToken)}.ics</code></p><p class="muted">Only approved cleanings appear. Google refreshes subscribed calendars every few hours.</p></div>
 <div class="card"><h2>Messages sent</h2><div class="scroll"><table><tr><th>When</th><th>To</th><th>Message</th><th>Status</th></tr>

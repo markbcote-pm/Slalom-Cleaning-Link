@@ -46,3 +46,5 @@ services:
         sync: false
       - key: TWILIO_FROM
         sync: false
+      - key: SMS_ONLY_TO      # testing: only these numbers get real texts, e.g. +12076512735
+        sync: false

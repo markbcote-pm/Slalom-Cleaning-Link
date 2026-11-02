@@ -49,6 +49,9 @@ Anything can be re-filed by hand, and texts from another thread can be pasted in
 1. **Airbnb link:** Airbnb > Listing > Availability > Connect calendars > Export calendar. Paste into `AIRBNB_ICAL_URL`.
 2. **Texting:** a Twilio account with a US number (about $1.15/month plus about a cent per text; US numbers
    need A2P 10DLC registration). Put the SID, token and number in `.env` and set `DRY_RUN=0`.
+   While testing, set `SMS_ONLY_TO` to your own number: real texts go only there and everyone
+   else's are held and listed on the More tab. More > Texting has a "Send me a test text" button
+   that reports delivery or explains the Twilio error.
    - `GROUP_MODE=individual` texts each person separately (simplest).
    - For one real group thread, run `npm run setup-group` once and set `GROUP_MODE=conversation`
      with the printed SID.

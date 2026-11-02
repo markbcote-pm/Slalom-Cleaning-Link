@@ -43,6 +43,9 @@ export function loadConfig(overrides = {}) {
     dryRun: e.DRY_RUN !== '0' || !e.TWILIO_ACCOUNT_SID,
     twilio: { sid: e.TWILIO_ACCOUNT_SID, token: e.TWILIO_AUTH_TOKEN, from: e.TWILIO_FROM, conversationSid: e.TWILIO_CONVERSATION_SID },
     groupMode: e.GROUP_MODE || 'individual',
+    // Safety switch while testing: when set, real texts go only to these numbers and
+    // everything else is logged as "held". Comma separated, e.g. +12076512735
+    smsOnlyTo: (e.SMS_ONLY_TO || '').split(',').map(x => x.replace(/\D/g, '').slice(-10)).filter(x => x.length === 10),
     resend: { key: e.RESEND_API_KEY, from: e.EMAIL_FROM },
   };
 }

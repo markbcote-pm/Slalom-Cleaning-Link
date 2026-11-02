@@ -14,15 +14,26 @@ export function createNotifier(db, config, { fetchImpl = globalThis.fetch } = {}
     return res.json();
   }
 
+  const allowed = (to) => !config.smsOnlyTo?.length || config.smsOnlyTo.includes(String(to).replace(/\D/g, '').slice(-10));
+
   async function sms(to, body) {
     if (!to) return;
     if (config.dryRun) return log('sms', to, null, body, 'dry_run');
+    if (!allowed(to)) return log('sms', to, null, body, 'held', 'Not sent: only SMS_ONLY_TO numbers get texts while testing');
     try {
-      await post(`https://api.twilio.com/2010-04-01/Accounts/${config.twilio.sid}/Messages.json`,
+      const r = await post(`https://api.twilio.com/2010-04-01/Accounts/${config.twilio.sid}/Messages.json`,
         new URLSearchParams({ To: to, From: config.twilio.from, Body: body }),
         { Authorization: twilioAuth(), 'Content-Type': 'application/x-www-form-urlencoded' });
-      log('sms', to, null, body, 'sent');
+      log('sms', to, null, body, 'sent', r?.sid ? `sid ${r.sid}` : null);
+      return r;
     } catch (e) { log('sms', to, null, body, 'failed', e.message); }
+  }
+
+  // Look up what happened to a sent text (Twilio reports carrier failures after the fact).
+  async function smsStatus(sid) {
+    const res = await fetchImpl(`https://api.twilio.com/2010-04-01/Accounts/${config.twilio.sid}/Messages/${sid}.json`, { headers: { Authorization: twilioAuth() } });
+    if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+    return res.json();
   }
 
   async function email(to, subject, body) {
@@ -40,6 +51,7 @@ export function createNotifier(db, config, { fetchImpl = globalThis.fetch } = {}
   async function group(body) {
     if (config.groupMode === 'conversation' && config.twilio.conversationSid) {
       if (config.dryRun) return log('group', 'conversation', null, body, 'dry_run');
+      if (config.smsOnlyTo?.length) return log('group', 'conversation', null, body, 'held', 'Group thread is off while SMS_ONLY_TO is set');
       try {
         await post(`https://conversations.twilio.com/v1/Conversations/${config.twilio.conversationSid}/Messages`,
           new URLSearchParams({ Author: 'cleaning-link', Body: body }),
@@ -59,5 +71,5 @@ export function createNotifier(db, config, { fetchImpl = globalThis.fetch } = {}
     }
   }
 
-  return { sms, email, group, approvers };
+  return { sms, smsStatus, email, group, approvers };
 }
