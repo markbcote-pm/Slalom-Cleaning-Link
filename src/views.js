@@ -19,7 +19,7 @@ table{width:100%;border-collapse:collapse}td,th{padding:8px 6px;border-top:1px s
 .dows{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));font-size:12px;color:var(--muted);text-align:center;margin-bottom:4px}
 .cal{display:flex;flex-direction:column;gap:4px}
 .week{display:grid;grid-template-columns:repeat(14,minmax(0,1fr));grid-template-rows:22px 24px 24px 26px;column-gap:0;row-gap:3px;position:relative}
-.day{cursor:pointer;grid-row:1/-1;min-width:0;border:1px solid var(--line);border-radius:8px;padding:2px 5px;font-size:12px;margin:0 2px}.day.out{background:var(--out);color:var(--muted)}.day.out b{font-weight:500}.day:hover{background:var(--win)}.day[data-past]{cursor:default}.day[data-past]:hover{background:none}.day.today{border-color:var(--accent);border-width:2px}.day.over{outline:2px dashed var(--accent)}.day.review{background:var(--pending);border:2px solid var(--s-pending);animation:pulse 1.2s ease-in-out 3}@keyframes pulse{50%{box-shadow:0 0 0 6px rgba(161,98,7,.25)}}.danger-text{color:var(--warn)}
+.day{cursor:pointer;grid-row:1/-1;min-width:0;border:1px solid var(--line);border-radius:8px;padding:2px 5px;font-size:12px;margin:0 2px}.day.out{background:var(--out);color:var(--muted)}.day.out b{font-weight:500}.day:hover{background:var(--win)}.day[data-past]{cursor:default}.day[data-past]:hover{background:none}.day.today{border-color:var(--accent);border-width:2px}.day.over{outline:2px dashed var(--accent)}.day.review{background:var(--pending);border:2px solid var(--s-pending);animation:pulse 1.2s ease-in-out 3}@keyframes pulse{50%{box-shadow:0 0 0 6px rgba(161,98,7,.25)}}.danger-text{color:var(--warn)}.save-state{font-size:12px;min-width:60px}
 .bar{pointer-events:none;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:12px;line-height:22px;padding:0 6px;border-radius:11px;z-index:1}
 .stay-bar{grid-row:2;background:var(--stay);color:#fff;font-weight:600}.stay-bar.pending{background:var(--s-pending)}.stay-bar.missing{background:var(--s-missing)}.stay-bar.past{background:var(--s-past)}.stay-bar.personal{background-image:repeating-linear-gradient(135deg,rgba(255,255,255,.18) 0 6px,transparent 6px 12px)}.stay-bar.flagged{box-shadow:inset 0 0 0 2px #ffd43b}.stay-bar.cont-l{border-top-left-radius:0;border-bottom-left-radius:0}.stay-bar.cont-r{border-top-right-radius:0;border-bottom-right-radius:0}
 .win-bar{grid-row:3;background:var(--win);color:var(--win-ink);border:1px dashed var(--win-line);line-height:20px;font-size:11px}
@@ -368,11 +368,11 @@ function staysCard(bookings, today, config, cleanings = []) {
 <input type="date" name="date" value="${w.from}" min="${w.from}" ${w.to ? `max="${w.to}"` : ''} required><button class="ghost" title="Already arranged with the cleaner, nothing is texted">Schedule</button></form>`
       : '';
     return `<tr><td><form method="post" action="/bookings/name" class="row"><input type="hidden" name="uid" value="${h(b.uid)}">
-<input name="name" value="${h(b.guest_name || '')}" placeholder="${h(guestLabel(b))}" style="width:150px"><button class="ghost">Save</button></form></td>
+<input name="name" value="${h(b.guest_name || '')}" placeholder="${h(guestLabel(b))}" style="width:150px" data-autosave autocomplete="off" aria-label="Guest name"><span class="save-state muted" aria-live="polite"></span></form></td>
 <td>${b.source === 'personal' ? '<b>⌂ Personal</b><br>' : ''}${h(prettyDate(b.check_in))} to ${h(prettyDate(b.check_out))}<div class="muted">${nights} night${nights === 1 ? '' : 's'}</div></td><td>${gap}${plan}${form}</td></tr>`;
   }).join('');
   return `<div class="card"><h2>Stays and cleaning windows</h2>
-<p class="muted">Airbnb's calendar link doesn't include guest names, only the last 4 digits of their phone. Type a name here and it shows on the calendar. "Schedule" books a cleaning you've already arranged, without texting anyone.</p>
+<p class="muted">Airbnb's calendar link doesn't include guest names, only the last 4 digits of their phone. Type a name here and it saves on its own, then shows on the calendar. "Schedule" books a cleaning you've already arranged, without texting anyone.</p>
 ${rows ? `<div class="scroll"><table><tr><th>Guest</th><th>Stay</th><th>Time to clean after</th></tr>${rows}</table></div>` : '<p class="muted">No upcoming stays.</p>'}</div>`;
 }
 
@@ -436,7 +436,20 @@ ${personalCard(bookings, today)}
 <div class="card"><h2>Schedule a cleaning</h2><form method="post" action="/cleanings">
 <div class="row"><input type="date" name="date" required min="${today}"><input name="note" placeholder="Note (optional)" style="flex:1;min-width:180px"></div>
 <div class="row" style="margin-top:8px"><button name="arranged" value="1">Schedule, already arranged with ${cleaner}</button><button class="ghost" name="arranged" value="0">Schedule and text the group</button></div></form>
-<p class="muted">You can also tap a day on the calendar. A scheduled cleaning covers the turnover it falls in, so the app won't propose another one between those two stays.</p></div>`);
+<p class="muted">You can also tap a day on the calendar. A scheduled cleaning covers the turnover it falls in, so the app won't propose another one between those two stays.</p></div>
+<script>
+// Guest names save on their own as you type (and on Enter or leaving the box).
+document.querySelectorAll('input[data-autosave]').forEach(inp=>{
+  const form=inp.form,state=form.querySelector('.save-state');let timer=null,last=inp.value;
+  const save=async()=>{clearTimeout(timer);if(inp.value===last)return;const v=inp.value;state.textContent='Saving…';
+    try{const r=await fetch(form.action,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','Accept':'application/json'},body:new URLSearchParams(new FormData(form))});
+      if(!r.ok)throw 0;last=v;state.textContent='Saved ✓';setTimeout(()=>{if(state.textContent==='Saved ✓')state.textContent=''},2000);}
+    catch(e){state.textContent='Not saved, try again';}};
+  inp.addEventListener('input',()=>{clearTimeout(timer);state.textContent='';timer=setTimeout(save,700);});
+  inp.addEventListener('blur',save);
+  form.addEventListener('submit',e=>{e.preventDefault();save();});
+});
+</script>`);
 }
 
 function personalCard(bookings, today) {

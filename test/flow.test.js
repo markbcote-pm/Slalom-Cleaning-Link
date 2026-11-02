@@ -189,7 +189,8 @@ test('HTTP: dashboard needs password, feed needs token, approval page works, dra
     assert.match(html, /class="chip awaiting_approval" draggable="true" data-id="\d+" style="grid-column:1\/span 2"/);
     assert.match(html, /Open, no next booking yet/);
 
-    await fetch(`${base}/bookings/name`, { method: 'POST', headers: auth, body: new URLSearchParams({ uid: 's1', name: 'Smith family' }), redirect: 'manual' });
+    const saved = await fetch(`${base}/bookings/name`, { method: 'POST', headers: { ...auth, Accept: 'application/json' }, body: new URLSearchParams({ uid: 's1', name: 'Smith family' }) });
+    assert.deepEqual(await saved.json(), { ok: true }, 'autosave gets JSON back, not a page reload');
     assert.match(await (await fetch(base + '/?month=2026-11', { headers: auth })).text(), /stay-bar[^"]*" style="grid-column:10\/15"[^>]*>Smith family</);
 
     const c = app.db.prepare('SELECT * FROM cleanings').get();
