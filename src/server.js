@@ -1,6 +1,7 @@
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { pathToFileURL } from 'node:url';
+import fs from 'node:fs';
 import { loadConfig } from './config.js';
 import { openDb } from './db.js';
 import { createNotifier } from './notify.js';
@@ -11,6 +12,12 @@ import { isDate, todayIn, prettyDate, localToUtc } from './dates.js';
 import { layout, messagePage, approvalPage, groupDecisionPage, dashboard, notesPage, todosPage, cleaningPage, inboxPage, staysPage, paymentsPage, morePage, loginPage } from './views.js';
 import { createNotes, validTwilioSignature } from './notes.js';
 import { smsInfoPage, privacyPage, termsPage, confirmationText } from './policy.js';
+
+const ASSETS = {
+  '/icon.svg': ['icon.svg', 'image/svg+xml'], '/favicon.ico': ['icon-192.png', 'image/png'],
+  '/apple-touch-icon.png': ['apple-touch-icon.png', 'image/png'], '/icon-192.png': ['icon-192.png', 'image/png'],
+  '/icon-512.png': ['icon-512.png', 'image/png'], '/icon-maskable.png': ['icon-maskable.png', 'image/png'],
+};
 
 export function createApp(config, deps = {}) {
   const db = deps.db || openDb(config);
@@ -84,6 +91,20 @@ export function createApp(config, deps = {}) {
     if (req.method === 'GET' && p === '/sms') return send(res, 200, smsInfoPage(config));
     if (req.method === 'GET' && p === '/privacy') return send(res, 200, privacyPage(config));
     if (req.method === 'GET' && (p === '/terms' || p === '/sms-terms')) return send(res, 200, termsPage(config));
+
+    // Logo, app icons and the home-screen manifest (public, so phones can fetch them).
+    if (req.method === 'GET' && ASSETS[p]) {
+      const [file, type] = ASSETS[p];
+      return send(res, 200, fs.readFileSync(new URL('../public/' + file, import.meta.url)), type, { 'Cache-Control': 'public, max-age=86400' });
+    }
+    if (req.method === 'GET' && p === '/manifest.webmanifest') {
+      return send(res, 200, JSON.stringify({
+        name: 'Cleaning Link', short_name: 'Cleaning', start_url: '/', display: 'standalone',
+        background_color: '#f7f6f3', theme_color: '#2f6f5e',
+        icons: [{ src: '/icon-192.png', sizes: '192x192', type: 'image/png' }, { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
+          { src: '/icon-maskable.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }, { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml' }],
+      }), 'application/manifest+json');
+    }
 
     // Calendar feed (secret URL, no login so calendar apps can fetch it)
     let m = p.match(/^\/feed\/(.+)\.ics$/);

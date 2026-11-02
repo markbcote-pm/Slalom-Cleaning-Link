@@ -809,3 +809,19 @@ test('Calendar feed URL is letters and digits even when Render\'s token has "/" 
     assert.ok(more.includes(`/feed/${config.feedId}.ics`));
   } finally { app.stop(); }
 });
+
+test('Logo, app icons and manifest are served without a login', async () => {
+  const app = createApp(loadConfig({ DOTENV: '0', DB_FILE: ':memory:', DRY_RUN: '1', ADMIN_PASSWORD: 'pw', APPROVERS: 'Mark:+12075550000:', CLEANER: 'Jenn:' }));
+  await new Promise(r => app.server.listen(0, r));
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  try {
+    for (const [path, type] of [['/icon.svg', 'image/svg+xml'], ['/apple-touch-icon.png', 'image/png'], ['/icon-512.png', 'image/png'], ['/manifest.webmanifest', 'application/manifest+json']]) {
+      const r = await fetch(base + path);
+      assert.equal(r.status, 200, path);
+      assert.equal(r.headers.get('content-type'), type);
+    }
+    const login = await (await fetch(base + '/login')).text();
+    assert.match(login, /rel="apple-touch-icon" href="\/apple-touch-icon.png"/);
+    assert.match(login, /class="brand"><img src="\/icon.svg"/);
+  } finally { app.stop(); }
+});

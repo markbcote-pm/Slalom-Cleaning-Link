@@ -42,6 +42,7 @@ body.dragging .bar,body.dragging .chip{pointer-events:none}
 .scroll{overflow-x:auto}
 .topbar{display:flex;justify-content:space-between;align-items:center;gap:8px}.topbar h1{display:inline;margin:0 8px 0 0}.test-badge{text-decoration:none;font-size:12px;padding:2px 8px;border-radius:99px;background:var(--pending);color:var(--pending-ink);vertical-align:middle}
 .toolbar{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:10px;font-size:13px}button.small{padding:5px 10px;font-size:13px}
+.brand,.topbar h1.brand{display:inline-flex;align-items:center;gap:8px;vertical-align:middle}.brand img{border-radius:22%;flex:none}
 .flash{margin-top:10px;padding:8px 12px;border-radius:8px;background:var(--chip);color:var(--chip-ink);font-size:14px}.alerts{display:flex;flex-wrap:wrap;gap:4px 16px;margin-top:8px;font-size:14px}
 .card:has(#cal){margin-top:10px}
 .tabs{display:flex;gap:2px;margin:10px 0 0;border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:none;white-space:nowrap}.tab{padding:8px 12px;white-space:nowrap;color:var(--muted);text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px}.tab.on{color:var(--ink);border-color:var(--accent);font-weight:600}
@@ -59,7 +60,8 @@ dialog{border:1px solid var(--line);border-radius:12px;background:var(--card);co
 
 export function layout(title, body) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${h(title)}</title><style>${CSS}</style></head><body><main>${body}</main></body></html>`;
+<title>${h(title)}</title><link rel="icon" href="/icon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#2f6f5e"><meta name="apple-mobile-web-app-title" content="Cleaning"><meta name="apple-mobile-web-app-capable" content="yes"><style>${CSS}</style></head><body><main>${body}</main></body></html>`;
 }
 
 export function messagePage(title, text, extra = '') {
@@ -67,7 +69,7 @@ export function messagePage(title, text, extra = '') {
 }
 
 export function loginPage({ next = '/', error = '', remember = true } = {}) {
-  return layout('Sign in', `<div class="card" style="max-width:380px;margin:12vh auto 0"><h1>Cleaning Link</h1>
+  return layout('Sign in', `<div class="card" style="max-width:380px;margin:12vh auto 0"><h1 class="brand"><img src="/icon.svg" alt="" width="36" height="36">Cleaning Link</h1>
 ${error ? `<p class="flash">${h(error)}</p>` : ''}
 <form method="post" action="/login"><input type="hidden" name="next" value="${h(next)}">
 <label>Password<br><input type="password" name="password" autocomplete="current-password" autofocus required style="width:100%"></label>
@@ -301,7 +303,7 @@ export function header({ config, db, who, active }) {
     + db.prepare("SELECT COUNT(*) n FROM cleanings WHERE status='approved' AND group_known_date = date AND cleaner_confirmed_at IS NULL AND date >= ?").get(todayIn(config.timezone)).n;
   const badge = (n) => n ? ` <span class="count">${n}</span>` : '';
   const tab = (key, href, label) => `<a class="tab ${active === key ? 'on' : ''}" href="${href}">${label}</a>`;
-  return `<div class="topbar"><div><h1>Cleaning Link</h1>${config.dryRun ? '<a class="test-badge" href="/more#texting">Test mode</a>' : config.smsOnlyTo?.length ? '<a class="test-badge" href="/more#texting">Texts: safety switch on</a>' : ''}</div>
+  return `<div class="topbar"><div><h1 class="brand"><img src="/icon.svg" alt="" width="28" height="28">Cleaning Link</h1>${config.dryRun ? '<a class="test-badge" href="/more#texting">Test mode</a>' : config.smsOnlyTo?.length ? '<a class="test-badge" href="/more#texting">Texts: safety switch on</a>' : ''}</div>
 <form method="post" action="/who" class="row"><label class="muted hide-sm">You are</label><select name="name" onchange="this.form.submit()" aria-label="You are">${whoSel}</select></form></div>
 <nav class="tabs">${tab('calendar', '/', 'Calendar')}${tab('inbox', '/inbox', `Waiting on you${badge(waiting)}`)}${tab('stays', '/stays', 'Stays')}${tab('todos', '/todos', `To-do${badge(openTodos)}`)}${tab('notes', '/notes', 'Notes')}${tab('payments', '/payments', 'Payments')}${tab('more', '/more', 'More')}</nav>`;
 }
