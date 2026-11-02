@@ -234,7 +234,7 @@ export function createService({ db, config, notifier }) {
       const owed = db.prepare("SELECT COALESCE(SUM(amount_cents),0) AS s, COUNT(*) AS n FROM cleanings WHERE status='completed' AND amount_cents IS NOT NULL").get();
       const name = config.cleaner?.name || 'the cleaner';
       await notifier.approvers('Cleaner payment due', () =>
-        `${due.length} cleaning(s) done. You now owe ${name} $${(owed.s / 100).toFixed(2)} for ${owed.n} cleaning(s). Mark paid: ${link('/#payments')}`);
+        `${due.length} cleaning(s) done. You now owe ${name} $${(owed.s / 100).toFixed(2)} for ${owed.n} cleaning(s). Mark paid: ${link('/payments')}`);
     }
     return due.length;
   }

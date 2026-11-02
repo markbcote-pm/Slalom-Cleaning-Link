@@ -8,7 +8,7 @@ import { createService } from './service.js';
 import { syncAirbnb } from './sync.js';
 import { cleaningFeed } from './feed.js';
 import { isDate, todayIn, prettyDate, localToUtc } from './dates.js';
-import { layout, messagePage, approvalPage, groupDecisionPage, dashboard, notesPage, todosPage, cleaningPage } from './views.js';
+import { layout, messagePage, approvalPage, groupDecisionPage, dashboard, notesPage, todosPage, cleaningPage, inboxPage, staysPage, paymentsPage, morePage } from './views.js';
 import { createNotes, validTwilioSignature } from './notes.js';
 
 export function createApp(config, deps = {}) {
@@ -132,6 +132,10 @@ export function createApp(config, deps = {}) {
       return send(res, 200, dashboard({ config, service, db, month, who, flash: url.searchParams.get('flash') }));
     }
     if (req.method === 'GET' && p === '/notes') return send(res, 200, notesPage({ config, db, who }));
+    if (req.method === 'GET' && p === '/inbox') return send(res, 200, inboxPage({ config, service, db, who }));
+    if (req.method === 'GET' && p === '/stays') return send(res, 200, staysPage({ config, service, db, who }));
+    if (req.method === 'GET' && p === '/payments') return send(res, 200, paymentsPage({ config, db, who }));
+    if (req.method === 'GET' && p === '/more') return send(res, 200, morePage({ config, db, who }));
     if (req.method === 'GET' && p === '/todos') return send(res, 200, todosPage({ config, db, who }));
     m = p.match(/^\/cleanings\/(\d+)$/);
     if (req.method === 'GET' && m) {
@@ -142,7 +146,8 @@ export function createApp(config, deps = {}) {
     const body = await readBody(req);
 
     if (p === '/who') {
-      return redirect(res, '/', { 'Set-Cookie': `who=${encodeURIComponent(validName(body.get('name')))}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax` });
+      const back = req.headers.referer ? new URL(req.headers.referer).pathname : '/';
+      return redirect(res, back, { 'Set-Cookie': `who=${encodeURIComponent(validName(body.get('name')))}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax` });
     }
     if (p === '/sync') {
       try {
@@ -203,15 +208,15 @@ export function createApp(config, deps = {}) {
     }
     if (p === '/bookings/name') {
       db.prepare('UPDATE bookings SET guest_name = ? WHERE uid = ?').run((body.get('name') || '').trim().slice(0, 60) || null, body.get('uid') || '');
-      return redirect(res, '/');
+      return redirect(res, '/stays');
     }
     if (p === '/payments/request') {
       const ok = service.recordPaymentRequest(Number(body.get('id')), body.get('amount'), who);
-      return redirect(res, ok ? '/#payments' : '/?flash=Enter+an+amount+above+zero#payments');
+      return redirect(res, '/payments');
     }
     if (p === '/payments/paid') {
       service.markPaid(body.getAll('id').map(Number), body.get('method'), who);
-      return redirect(res, '/#payments');
+      return redirect(res, '/payments');
     }
     return send(res, 404, 'Not found', 'text/plain');
   }
