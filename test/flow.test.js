@@ -64,7 +64,7 @@ test('new booking -> approval request -> approve -> group text -> calendar', asy
   assert.equal(res.cleaning.status, 'approved');
   const g = outbox();
   assert.deepEqual(g.map(m => m.to_addr), ['+15550000001', '+15550000002', '+15550000003']);
-  assert.match(g[0].body, /^CLEANING CONFIRMED: Sun, Nov 8/);
+  assert.equal(g[0].body, 'New cleaning request for 2072 Slalom Ct: Sun, Nov 8. Guest checks out at 11 AM. Next guests arrive 4 PM the same day, so please be done by then.');
 
   // second approval of same link is harmless
   const again = await app.service.approve(t, 'Mark');
