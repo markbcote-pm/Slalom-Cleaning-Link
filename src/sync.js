@@ -16,7 +16,9 @@ export async function syncAirbnb({ db, config, service, fetchImpl = globalThis.f
   const stamp = now.toISOString();
   const reservations = parseIcal(text).filter(isReservation);
   const seen = new Set();
-  const result = { added: 0, moved: 0, cancelled: 0, total: reservations.length };
+  const result = { added: 0, moved: 0, cancelled: 0, total: reservations.length, newBookings: [], changed: [] };
+  // The very first check finds every existing booking; that isn't news worth a notification.
+  const firstRun = !db.prepare('SELECT 1 FROM bookings LIMIT 1').get();
 
   // Pass 1: record every booking first, so messages can mention same-day turnovers.
   const previous = new Map();
@@ -47,6 +49,7 @@ export async function syncAirbnb({ db, config, service, fetchImpl = globalThis.f
           service.logEvent(covering.id, 'Linked', `Covers the Airbnb stay ${r.start} to ${r.end}`);
         }
         result.covered = (result.covered || 0) + 1;
+        if (!existing && !firstRun) result.newBookings.push({ uid: r.uid, cleaning: service.get(covering.id), covered: true });
         continue;
       }
       const ins = db.prepare(`INSERT INTO cleanings (booking_uid, source, date, status, sequence, created_at, updated_at)
@@ -55,10 +58,12 @@ export async function syncAirbnb({ db, config, service, fetchImpl = globalThis.f
       service.logEvent(c.id, 'Booked', `Airbnb stay ${r.start} to ${r.end}`);
       await service.requestApproval(c, 'New booking');
       result.added++;
+      if (!existing && !firstRun) result.newBookings.push({ uid: r.uid, cleaning: service.get(c.id) });
     } else if (existing && existing.check_out !== r.end && cleaning.date === existing.check_out && r.end >= today) {
       // Only follow Airbnb if nobody moved this cleaning by hand.
       await service.move(cleaning.id, r.end, 'Airbnb', { fromAirbnb: true });
       result.moved++;
+      result.changed.push({ uid: r.uid, cleaning: service.get(cleaning.id) });
     }
   }
 
