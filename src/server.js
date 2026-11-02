@@ -10,6 +10,7 @@ import { cleaningFeed } from './feed.js';
 import { isDate, todayIn, prettyDate, localToUtc } from './dates.js';
 import { layout, messagePage, approvalPage, groupDecisionPage, dashboard, notesPage, todosPage, cleaningPage, inboxPage, staysPage, paymentsPage, morePage } from './views.js';
 import { createNotes, validTwilioSignature } from './notes.js';
+import { smsInfoPage, privacyPage, termsPage } from './policy.js';
 
 export function createApp(config, deps = {}) {
   const db = deps.db || openDb(config);
@@ -59,6 +60,10 @@ export function createApp(config, deps = {}) {
     const p = url.pathname;
 
     if (p === '/health') return send(res, 200, 'ok', 'text/plain');
+    // Public pages for carrier registration (no login).
+    if (req.method === 'GET' && p === '/sms') return send(res, 200, smsInfoPage(config));
+    if (req.method === 'GET' && p === '/privacy') return send(res, 200, privacyPage(config));
+    if (req.method === 'GET' && p === '/terms') return send(res, 200, termsPage(config));
 
     // Calendar feed (secret URL, no login so calendar apps can fetch it)
     let m = p.match(/^\/feed\/([^/]+)\.ics$/);

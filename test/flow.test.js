@@ -667,3 +667,19 @@ test('Live texting with SMS_ONLY_TO: only Mark gets real texts; test-text button
     assert.match(decodeURIComponent(r.headers.get('location')), /A2P 10DLC registration \(30034\)/);
   } finally { app.stop(); }
 });
+
+test('Public SMS info, privacy and terms pages need no login and cover what carriers check', async () => {
+  const { app } = setup();
+  await new Promise(r => app.server.listen(0, r));
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  try {
+    const sms = await fetch(base + '/sms'); assert.equal(sms.status, 200);
+    assert.match(await sms.text(), /How people opt in[\s\S]*STOP[\s\S]*HELP/);
+    const priv = await (await fetch(base + '/privacy')).text();
+    assert.match(priv, /do not sell, rent or share mobile phone numbers or SMS opt-in information with third parties/);
+    const terms = await (await fetch(base + '/terms')).text();
+    assert.match(terms, /Message and data rates may apply/);
+    assert.match(terms, /Message frequency varies/);
+    assert.match(terms, /Reply <b>STOP<\/b>/);
+  } finally { app.stop(); }
+});
