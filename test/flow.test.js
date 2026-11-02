@@ -56,8 +56,12 @@ test('new booking -> approval request -> approve -> group text -> calendar', asy
   assert.match(first.body, /same day/);
   const t = token(first.body, 'a');
 
-  // nothing on the calendar yet
-  assert.doesNotMatch(cleaningFeed({ db: app.db, config, service: app.service }), /BEGIN:VEVENT/);
+  // On the calendar as "needs OK" until approved; stays show too.
+  let feed = cleaningFeed({ db: app.db, config, service: app.service });
+  assert.equal((feed.match(/UID:cleaning-/g) || []).length, 2);
+  assert.match(feed, /SUMMARY:🟡 Cleaning · needs OK/);
+  assert.match(feed, /UID:stay-/);
+  assert.doesNotMatch(cleaningFeed({ db: app.db, config, service: app.service, only: 'stays' }), /UID:cleaning-/);
 
   clearOutbox();
   const res = await app.service.approve(t, 'Danielle');
@@ -70,8 +74,11 @@ test('new booking -> approval request -> approve -> group text -> calendar', asy
   const again = await app.service.approve(t, 'Mark');
   assert.ok(again.error || again.already);
 
-  const ics = cleaningFeed({ db: app.db, config, service: app.service });
-  assert.equal((ics.match(/BEGIN:VEVENT/g) || []).length, 1);
+  const ics = cleaningFeed({ db: app.db, config, service: app.service, only: 'cleanings' });
+  assert.equal((ics.match(/UID:cleaning-/g) || []).length, 2);
+  assert.doesNotMatch(ics, /UID:stay-/);
+  assert.match(ics, /SUMMARY:🟣 Cleaning · waiting on Rosa\r\nDESCRIPTION:Sun\\, Nov 8/);
+  assert.match(ics, /COLOR:mediumpurple/);
   assert.match(ics, /DTSTART:20261108T190000Z/);
   assert.match(ics, /DTEND:20261109T000000Z/);
 });
@@ -112,8 +119,10 @@ test('Airbnb cancellation: say no and nothing is texted', async () => {
   clearOutbox();
   await app.service.decideGroupMessage(gt, false, 'Danielle');
   assert.equal(outbox().length, 0);
-  // cancelled cleanings leave the calendar
-  assert.doesNotMatch(cleaningFeed({ db: app.db, config, service: app.service }), /BEGIN:VEVENT/);
+  // the cancelled stay and its cleaning leave the calendar; the other stay remains
+  const feed = cleaningFeed({ db: app.db, config, service: app.service });
+  assert.doesNotMatch(feed, new RegExp(`UID:cleaning-${c.id}@|UID:stay-s1@`));
+  assert.match(feed, /UID:stay-s2@/);
 });
 
 test('empty Airbnb feed does not cancel everything', async () => {
