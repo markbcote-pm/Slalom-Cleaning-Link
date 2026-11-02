@@ -323,7 +323,7 @@ export function createService({ db, config, notifier }) {
   }
 
   // A text from the cleaner that says yes ("Yes", "Sounds good", "👍") confirms the cleaning
-  // she was asked about. With several open asks, it needs a date ("yes for the 23rd") or
+  // that was texted to the group. With several open asks, it needs a date ("yes for the 23rd") or
   // "both"/"all"; otherwise it is left for Mark or Danielle to confirm by hand.
   const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
   function isCleaner(phone, author) {
