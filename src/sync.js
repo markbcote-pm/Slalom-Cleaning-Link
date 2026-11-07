@@ -75,7 +75,9 @@ export async function syncAirbnb({ db, config, service, fetchImpl = globalThis.f
     for (const b of missing) {
       db.prepare("UPDATE bookings SET status='cancelled' WHERE uid = ?").run(b.uid);
       const c = db.prepare('SELECT * FROM cleanings WHERE booking_uid = ?').get(b.uid);
-      if (c) { await service.cancel(c.id, 'Airbnb', { fromAirbnb: true }); result.cancelled++; }
+      let r = null;
+      if (c) { r = await service.cancel(c.id, 'Airbnb', { fromAirbnb: true }); result.cancelled++; }
+      result.cancelledBookings = [...(result.cancelledBookings || []), { uid: b.uid, cleaning: r?.cleaning || c || null, message: r?.message || null }];
     }
   } else if (missing.length) {
     result.warning = `Airbnb feed came back empty; kept ${missing.length} bookings as-is.`;
