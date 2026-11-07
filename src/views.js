@@ -15,6 +15,7 @@ button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line
 input,textarea,select{font:inherit;padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}textarea{width:100%;min-height:130px}
 table{width:100%;border-collapse:collapse}td,th{padding:8px 6px;border-top:1px solid var(--line);text-align:left;vertical-align:top}th{font-weight:600;color:var(--muted);font-size:13px}
 .stages{display:flex;gap:4px;flex-wrap:wrap}.stage{font-size:12px;padding:2px 7px;border-radius:99px;border:1px solid var(--line);color:var(--muted)}.stage.done{background:var(--chip);color:var(--chip-ink);border-color:transparent}
+.stage.tap{cursor:pointer;font:inherit;font-size:13px;padding:5px 11px;background:var(--card);color:var(--ink);border:1.5px solid var(--accent)}.stage.tap.done{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 .pill{font-size:12px;padding:2px 8px;border-radius:99px;background:var(--pending);color:var(--pending-ink)}.pill.asked{background:var(--c-asked);color:var(--c-asked-ink)}
 .dows{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));font-size:12px;color:var(--muted);text-align:center;margin-bottom:4px}
 .cal{display:flex;flex-direction:column;gap:4px}
@@ -385,6 +386,52 @@ function stateBanner(c, config) {
   return `<div class="state-banner"><span class="chip cs-${st} static">${chipLabel(c, st)}</span><span>${text}</span>${btn}</div>`;
 }
 
+
+// The step pills on a cleaning. Cleaned, price quoted and paid can be tapped to record them.
+const STEP_LABEL = { 'Payment requested': 'Price quoted' };
+function stepPills(c, service, config) {
+  const live = !['cancelled', 'declined', 'awaiting_approval'].includes(c.status);
+  const tap = { 'Cleaner confirmed': live && c.group_known_date === c.date && !['completed', 'paid'].includes(c.status) ? 'confirm-dialog' : null,
+    Cleaned: live ? 'cleaned-dialog' : null, 'Payment requested': live ? 'quote-dialog' : null, Paid: live ? 'paid-dialog' : null };
+  const pills = service.stageOf(c).map(s => {
+    const label = h(STEP_LABEL[s.name] || s.name);
+    return tap[s.name] ? `<button type="button" class="stage tap ${s.done ? 'done' : ''}" data-open="${tap[s.name]}">${s.done ? '✓ ' : ''}${label}</button>`
+      : `<span class="stage ${s.done ? 'done' : ''}">${label}</span>`;
+  }).join('');
+  const cleaner = h(config.cleaner?.name || 'the cleaner');
+  const today = todayIn(config.timezone);
+  const done = ['completed', 'paid'].includes(c.status);
+  const dollars = c.amount_cents != null ? (c.amount_cents / 100).toFixed(2) : '';
+  const methods = ['Venmo', 'Zelle', 'Cash', 'Check', 'Other'].map(m => `<option ${m === c.paid_method ? 'selected' : ''}>${m}</option>`).join('');
+  const close = '<button type="button" class="ghost" data-close>Cancel</button>';
+  return `<div class="stages">${pills}</div>${live ? '<p class="muted" style="font-size:12px;margin:4px 0 0">Tap a step to mark it done.</p>' : ''}
+<dialog id="confirm-dialog"><form method="post" action="/cleanings/${c.id}/confirm"><h2>${cleaner} confirmed?</h2><p>Mark that ${cleaner} said yes to ${h(prettyDate(c.date))}.</p>
+<div class="dialog-actions"><button>Yes, ${cleaner} confirmed</button>${close}</div></form></dialog>
+<dialog id="cleaned-dialog"><form method="post" action="/cleanings/${c.id}/cleaned"><h2>${done ? 'Cleaned' : 'Mark as cleaned?'}</h2>
+<p>${done ? `${h(prettyDate(c.date))} is marked as cleaned.` : `Mark the ${h(prettyDate(c.date))} cleaning as done.`}${c.date > today && !done ? ' <span class="warn">This date is still ahead.</span>' : ''}</p>
+<div class="dialog-actions">${done ? (c.status === 'paid' ? '<p class="muted">Already paid, so this can\'t be undone here. Undo the payment first.</p>' : '<button name="yes" value="0" class="ghost">Not cleaned yet (undo)</button>') : '<button name="yes" value="1">Yes, it\'s cleaned</button>'}${close}</div></form></dialog>
+<dialog id="quote-dialog"><form method="post" action="/cleanings/${c.id}/quote"><h2>Price quoted</h2><p>What ${cleaner} is charging for this cleaning.</p>
+${c.status === 'paid' ? `<p><b>${money(c.amount_cents)}</b>, already paid.</p><div class="dialog-actions">${close}</div>` : `<label class="muted">Amount ($)<br><input name="amount" type="number" min="1" step="0.01" inputmode="decimal" value="${dollars}" required style="width:100%"></label>
+${!done ? '<p class="muted">Saving a price also marks the cleaning as cleaned.</p>' : ''}<div class="dialog-actions"><button>Save price</button>${close}</div>`}</form></dialog>
+<dialog id="paid-dialog"><form method="post" action="/cleanings/${c.id}/paid"><h2>${c.status === 'paid' ? 'Paid' : 'Mark as paid'}</h2>
+${c.status === 'paid' ? `<p><b>${money(c.amount_cents)}</b> paid ${h(prettyDate(c.paid_at.slice(0, 10)))}${c.paid_method ? ` by ${h(c.paid_method)}` : ''}.</p><div class="dialog-actions"><button name="undo" value="1" class="ghost">Undo payment</button>${close}</div>`
+    : `<label class="muted">Amount ($)<br><input name="amount" type="number" min="1" step="0.01" inputmode="decimal" value="${dollars}" required style="width:100%"></label>
+<label class="muted">Date paid<br><input name="paid_on" type="date" value="${today}" max="${today}" required style="width:100%"></label>
+<label class="muted">How<br><select name="method" style="width:100%">${methods}</select></label>
+<div class="dialog-actions"><button>Mark paid</button>${close}</div>`}</form></dialog>
+<script>
+document.querySelectorAll('[data-open]').forEach(b => b.addEventListener('click', () => document.getElementById(b.dataset.open).showModal()));
+document.querySelectorAll('dialog [data-close]').forEach(b => b.addEventListener('click', () => b.closest('dialog').close()));
+</script>`;
+}
+
+function paymentRow(c, config) {
+  if (c.amount_cents == null && c.status !== 'paid') return '';
+  return `<p style="margin:8px 0 0">${c.status === 'paid'
+    ? `Paid <b>${money(c.amount_cents)}</b> on ${h(prettyDate(c.paid_at.slice(0, 10)))}${c.paid_method ? ` by ${h(c.paid_method)}` : ''}.`
+    : `Price quoted: <b>${money(c.amount_cents)}</b>, not paid yet.`}</p>`;
+}
+
 export function cleaningPage({ config, db, who, service, id }) {
   const c = service.get(id);
   if (!c) return null;
@@ -399,8 +446,9 @@ export function cleaningPage({ config, db, who, service, id }) {
   const stayText = (b) => b ? `${h(guestLabel(b))}, ${h(prettyDate(b.check_in))} to ${h(prettyDate(b.check_out))}` : 'None';
   return layout(`Cleaning ${prettyDate(c.date)}`, `${header({ config, db, who, active: 'calendar' })}
 <div class="card"><p><a href="/?month=${c.date.slice(0, 7)}">&lsaquo; Calendar</a></p><h2>Cleaning ${h(prettyDate(c.date))}</h2>
-<div class="stages">${service.stageOf(c).map(s => `<span class="stage ${s.done ? 'done' : ''}">${h(s.name)}</span>`).join('')}</div>
+${stepPills(c, service, config)}
 ${stateBanner(c, config)}
+${paymentRow(c, config)}
 <table style="margin-top:10px"><tr><th>After the stay of</th><td>${stayText(stay)}</td></tr><tr><th>Before the stay of</th><td>${stayText(nextStay)}</td></tr>
 ${c.note ? `<tr><th>Note</th><td>${h(c.note)}</td></tr>` : ''}</table></div>
 <div class="card"><h2>Notes</h2>${notes.length ? `<ul class="notes">${notes.map(n => noteItem(n, { config, cleanings, showCleaning: false })).join('')}</ul>` : '<p class="muted">No notes for this cleaning yet.</p>'}
@@ -574,7 +622,32 @@ function personalCard(bookings, today) {
 ${rows ? `<div class="scroll" style="margin-top:10px"><table>${rows}</table></div>` : ''}</div>`;
 }
 
-export function paymentsPage({ config, db, who }) {
+function ledgerCard(db, config, year) {
+  const years = db.prepare("SELECT DISTINCT substr(paid_at,1,4) y FROM cleanings WHERE status='paid' AND paid_at IS NOT NULL ORDER BY y DESC").all().map(r => r.y);
+  const rows = paidInYear(db, year);
+  const total = rows.reduce((t, c) => t + (c.amount_cents || 0), 0);
+  const cleaner = h(config.cleaner?.name || 'Cleaner');
+  return `<div class="card" id="records"><h2>Payment records</h2>
+<div class="row"><form method="get" action="/payments" class="row"><select name="year" onchange="this.form.submit()">${[...new Set([year, ...years])].sort().reverse().map(y => `<option ${y === year ? 'selected' : ''}>${h(y)}</option>`).join('')}</select></form>
+<a class="btn ghost" href="/payments.csv?year=${h(year)}" download>Download ${h(year)} (spreadsheet)</a></div>
+<p>${h(year)} total paid to ${cleaner}: <b>${money(total)}</b> for ${rows.length} cleaning${rows.length === 1 ? '' : 's'}.</p>
+${rows.length ? `<div class="scroll"><table><tr><th>Paid on</th><th>Cleaning</th><th>Amount</th><th>How</th></tr>${rows.map(c => `<tr><td>${h(prettyDate(c.paid_at.slice(0, 10)))}</td><td><a href="/cleanings/${c.id}">${h(prettyDate(c.date))}</a></td><td>${money(c.amount_cents)}</td><td>${h(c.paid_method || '')}</td></tr>`).join('')}</table></div>` : '<p class="muted">No payments recorded for this year.</p>'}
+<p class="muted">Counted by the date you paid. The download opens in Excel, Numbers or Google Sheets for your tax records.</p></div>`;
+}
+
+export const paidInYear = (db, year) => db.prepare("SELECT * FROM cleanings WHERE status='paid' AND substr(paid_at,1,4)=? ORDER BY paid_at, date").all(String(year));
+
+export function paymentsCsv(db, config, year) {
+  const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const rows = paidInYear(db, year);
+  const total = rows.reduce((t, c) => t + (c.amount_cents || 0), 0);
+  return ['Paid on,Cleaning date,Paid to,Amount (USD),Method,Property,Cleaning ID',
+    ...rows.map(c => [c.paid_at.slice(0, 10), c.date, config.cleaner?.name || 'Cleaner', (c.amount_cents / 100).toFixed(2), c.paid_method || '', config.propertyName, c.id].map(q).join(',')),
+    ['', '', 'Total', (total / 100).toFixed(2), '', '', ''].map(q).join(',')].join('\r\n') + '\r\n';
+}
+
+export function paymentsPage({ config, db, who, year = null }) {
+  year = /^\d{4}$/.test(year || '') ? year : todayIn(config.timezone).slice(0, 4);
   const today = todayIn(config.timezone);
   const owed = db.prepare("SELECT * FROM cleanings WHERE status='completed' AND amount_cents IS NOT NULL ORDER BY date").all();
   const awaitingBill = db.prepare("SELECT * FROM cleanings WHERE status='completed' AND amount_cents IS NULL ORDER BY date").all();
@@ -591,7 +664,8 @@ ${awaitingBill.length ? `<h2 style="margin-top:14px">Cleaned, waiting for ${clea
 ${awaitingBill.map(c => `<tr><td>${h(prettyDate(c.date))}</td><td><form method="post" action="/payments/request" class="row"><input type="hidden" name="id" value="${c.id}"><input name="amount" type="number" min="1" step="0.01" placeholder="Amount $" required style="width:120px"><button class="ghost">Save request</button></form></td></tr>`).join('')}</table>` : ''}
 ${owed.length ? `<h2 style="margin-top:14px">Requested, not paid yet</h2><form method="post" action="/payments/paid"><table><tr><th></th><th>Cleaning</th><th>Amount</th></tr>${owedRows}</table>
 <div class="row" style="margin-top:10px"><select name="method"><option>Venmo</option><option>Zelle</option><option>Cash</option><option>Check</option><option>Other</option></select><button>Mark selected paid</button></div></form>` : ''}
-${recentPaid ? `<h2 style="margin-top:14px">Recently paid</h2><table>${recentPaid}</table>` : ''}</div>`);
+${recentPaid ? `<h2 style="margin-top:14px">Recently paid</h2><table>${recentPaid}</table>` : ''}</div>
+${ledgerCard(db, config, year)}`);
 }
 
 function textingCard(config, who, flash = '', consents = {}) {

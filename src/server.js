@@ -9,7 +9,7 @@ import { createService } from './service.js';
 import { syncAirbnb } from './sync.js';
 import { cleaningFeed } from './feed.js';
 import { isDate, todayIn, prettyDate, localToUtc } from './dates.js';
-import { layout, messagePage, approvalPage, groupDecisionPage, dashboard, notesPage, todosPage, cleaningPage, inboxPage, staysPage, paymentsPage, morePage, loginPage } from './views.js';
+import { layout, messagePage, approvalPage, groupDecisionPage, dashboard, notesPage, todosPage, cleaningPage, inboxPage, staysPage, paymentsPage, paymentsCsv, morePage, loginPage } from './views.js';
 import { createNotes, validTwilioSignature } from './notes.js';
 import { createPush, SERVICE_WORKER } from './push.js';
 import { smsInfoPage, privacyPage, termsPage, confirmationText } from './policy.js';
@@ -251,7 +251,11 @@ export function createApp(config, deps = {}) {
     if (req.method === 'GET' && p === '/notes') return send(res, 200, notesPage({ config, db, who }));
     if (req.method === 'GET' && p === '/inbox') return send(res, 200, inboxPage({ config, service, db, who }));
     if (req.method === 'GET' && p === '/stays') return send(res, 200, staysPage({ config, service, db, who, flash: url.searchParams.get('flash') }));
-    if (req.method === 'GET' && p === '/payments') return send(res, 200, paymentsPage({ config, db, who }));
+    if (req.method === 'GET' && p === '/payments') return send(res, 200, paymentsPage({ config, db, who, year: url.searchParams.get('year') }));
+    if (req.method === 'GET' && p === '/payments.csv') {
+      const year = /^\d{4}$/.test(url.searchParams.get('year') || '') ? url.searchParams.get('year') : todayIn(config.timezone).slice(0, 4);
+      return send(res, 200, paymentsCsv(db, config, year), 'text/csv; charset=utf-8', { 'Content-Disposition': `attachment; filename="cleaning-payments-${year}.csv"` });
+    }
     if (req.method === 'GET' && p === '/more') return send(res, 200, morePage({ config, db, who, flash: url.searchParams.get('flash'), push }));
     if (req.method === 'GET' && p === '/todos') return send(res, 200, todosPage({ config, db, who }));
     m = p.match(/^\/cleanings\/(\d+)$/);
@@ -407,6 +411,22 @@ export function createApp(config, deps = {}) {
     if (p === '/bookings/name') {
       db.prepare('UPDATE bookings SET guest_name = ? WHERE uid = ?').run((body.get('name') || '').trim().slice(0, 60) || null, body.get('uid') || '');
       return wantsJson(req) ? send(res, 200, JSON.stringify({ ok: true }), 'application/json') : redirect(res, '/stays');
+    }
+    m = p.match(/^\/cleanings\/(\d+)\/(cleaned|quote|paid)$/);
+    if (m) {
+      const id = Number(m[1]);
+      if (m[2] === 'cleaned') service.markCleaned(id, who, body.get('yes') !== '0');
+      if (m[2] === 'quote') service.recordPaymentRequest(id, body.get('amount'), who);
+      if (m[2] === 'paid') {
+        if (body.get('undo') === '1') service.unmarkPaid(id, who);
+        else {
+          const c = service.get(id);
+          if (c && c.status !== 'paid' && body.get('amount') && Math.round(Number(body.get('amount')) * 100) !== c.amount_cents) service.recordPaymentRequest(id, body.get('amount'), who);
+          else if (c && c.status === 'approved' && c.amount_cents != null) service.markCleaned(id, who, true);
+          service.markPaid([id], body.get('method'), who, body.get('paid_on'));
+        }
+      }
+      return redirect(res, `/cleanings/${id}`);
     }
     if (p === '/payments/request') {
       const ok = service.recordPaymentRequest(Number(body.get('id')), body.get('amount'), who);
