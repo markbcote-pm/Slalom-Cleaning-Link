@@ -460,15 +460,39 @@ export function createService({ db, config, notifier }) {
     return get(id);
   }
 
-  function markPaid(ids, method, by) {
+  // paidOn (YYYY-MM-DD) is the day the money went out, for the year-end records.
+  function markPaid(ids, method, by, paidOn = null) {
+    const at = paidOn && /^\d{4}-\d{2}-\d{2}$/.test(paidOn) ? `${paidOn}T12:00:00.000Z` : nowIso();
     return tx(db, () => {
       for (const id of ids) {
         const c = get(id);
         if (!c || c.status !== 'completed' || c.amount_cents == null) continue;
-        update(id, { status: 'paid', paid_at: nowIso(), paid_method: method || null });
-        logEvent(id, 'Paid', `$${(c.amount_cents / 100).toFixed(2)}${method ? ` by ${method}` : ''}, marked by ${by}`);
+        update(id, { status: 'paid', paid_at: at, paid_method: method || null });
+        logEvent(id, 'Paid', `$${(c.amount_cents / 100).toFixed(2)}${method ? ` by ${method}` : ''} on ${at.slice(0, 10)}, marked by ${by}`);
       }
     });
+  }
+
+  function unmarkPaid(id, by) {
+    const c = get(id);
+    if (!c || c.status !== 'paid') return null;
+    update(id, { status: 'completed', paid_at: null, paid_method: null });
+    logEvent(id, 'Payment undone', `by ${by}`);
+    return get(id);
+  }
+
+  // Tapping "Cleaned" on a cleaning. Undo only while nothing has been paid.
+  function markCleaned(id, by, yes = true) {
+    const c = get(id);
+    if (!c) return null;
+    if (yes && c.status === 'approved') {
+      update(id, { status: 'completed' });
+      logEvent(id, 'Cleaned', `Marked by ${by}`);
+    } else if (!yes && c.status === 'completed') {
+      update(id, { status: 'approved', amount_cents: null });
+      logEvent(id, 'Cleaned undone', `by ${by}`);
+    }
+    return get(id);
   }
 
   // ---- Read models --------------------------------------------------------------------
@@ -477,6 +501,9 @@ export function createService({ db, config, notifier }) {
     const ev = db.prepare('SELECT stage FROM events WHERE cleaning_id = ?').all(c.id).map(e => e.stage);
     return STAGES.map(s => ({ name: s, done: s === 'Booked' ? true
       : s === 'Cleaner confirmed' ? !!c.cleaner_confirmed_at || ['completed', 'paid'].includes(c.status)
+      : s === 'Cleaned' ? ['completed', 'paid'].includes(c.status)
+      : s === 'Payment requested' ? c.amount_cents != null && ['completed', 'paid'].includes(c.status)
+      : s === 'Paid' ? c.status === 'paid'
       : ev.includes(s) || (s === 'Approval requested' && c.source === 'manual') }));
   }
 
@@ -487,6 +514,6 @@ export function createService({ db, config, notifier }) {
 
   return {
     get, list, stageOf, describe, windowFor, cleaningInWindow, addPersonalStay, updatePersonalStay, removePersonalStay, requestApproval, approve, approveProposal, dropCoveredProposals, decline, decideGroupMessage, testGroupMessage, undoSkip, restoreDeclined, addManual, move, cancel,
-    customGroupMessage, confirmByCleaner, cleanerReply, autoComplete, recordPaymentRequest, markPaid, logEvent, update,
+    customGroupMessage, confirmByCleaner, cleanerReply, autoComplete, recordPaymentRequest, markPaid, unmarkPaid, markCleaned, logEvent, update,
   };
 }
