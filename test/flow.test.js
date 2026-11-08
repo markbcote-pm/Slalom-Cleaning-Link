@@ -456,7 +456,7 @@ test('Review on the calendar: approve without texting, approve and text after pr
     const inbox = await (await fetch(base + '/inbox', { headers: auth })).text();
     assert.match(inbox, new RegExp(`href="/\\?month=2026-11&review=${c1.id}">Review<`));
     const cal = await (await fetch(`${base}/?month=2026-11&review=${c1.id}`, { headers: auth })).text();
-    assert.match(cal, /class="day\s+review" data-date="2026-11-08"/);
+    assert.match(cal, /class="day [^"]*\breview" data-date="2026-11-08"/);
     assert.match(cal, new RegExp(`const review=\\{"id":${c1.id},"date":"2026-11-08"`));
 
     // Already arranged: approved, nothing texted.
@@ -932,6 +932,69 @@ test('A new Airbnb booking sends a phone notification that opens its cleaning fo
   assert.equal(msg.url, `/?month=2026-11&review=${r.newBookings[0].cleaning.id}`);
   sent.length = 1;
   assert.equal(sent.length, 1);
+});
+
+test('Cleaning steps are tappable: cleaned, price quoted, paid (with date and method), undo; yearly records and spreadsheet download', async () => {
+  const app = createApp(loadConfig({ DOTENV: '0', DB_FILE: ':memory:', DRY_RUN: '1', ADMIN_PASSWORD: 'pw', APPROVERS: 'Mark:+12075550000:', CLEANER: 'Jenn:', CLEANING_FEE: '0', TIMEZONE: 'America/Los_Angeles' }));
+  await new Promise(r => app.server.listen(0, r));
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const auth = { Authorization: 'Basic ' + Buffer.from('x:pw').toString('base64') };
+  const post = (path, data) => fetch(base + path, { method: 'POST', headers: auth, body: new URLSearchParams(data), redirect: 'manual' });
+  try {
+    const { cleaning } = await app.service.addManual('2026-11-04', null, 'Mark', { alreadyArranged: true });
+    const id = cleaning.id;
+    const stages = () => Object.fromEntries(app.service.stageOf(app.service.get(id)).map(s => [s.name, s.done]));
+    let page = await (await fetch(`${base}/cleanings/${id}`, { headers: auth })).text();
+    assert.match(page, /<button type="button" class="stage tap " data-open="cleaned-dialog">Cleaned<\/button>/);
+    assert.match(page, /data-open="quote-dialog">Price quoted</);
+
+    // Cleaned, then undo, then cleaned again.
+    assert.equal((await post(`/cleanings/${id}/cleaned`, { yes: '1' })).headers.get('location'), `/cleanings/${id}`);
+    assert.equal(app.service.get(id).status, 'completed');
+    assert.ok(stages().Cleaned);
+    await post(`/cleanings/${id}/cleaned`, { yes: '0' });
+    assert.equal(app.service.get(id).status, 'approved');
+    assert.ok(!stages().Cleaned);
+    await post(`/cleanings/${id}/cleaned`, { yes: '1' });
+
+    // Price quoted.
+    await post(`/cleanings/${id}/quote`, { amount: '145.50' });
+    assert.equal(app.service.get(id).amount_cents, 14550);
+    assert.ok(stages()['Payment requested']);
+    page = await (await fetch(`${base}/cleanings/${id}`, { headers: auth })).text();
+    assert.match(page, /Price quoted: <b>\$145\.50<\/b>, not paid yet/);
+
+    // Paid on a chosen date by Zelle.
+    await post(`/cleanings/${id}/paid`, { amount: '145.50', paid_on: '2026-11-05', method: 'Zelle' });
+    let c = app.service.get(id);
+    assert.equal(c.status, 'paid');
+    assert.equal(c.paid_at.slice(0, 10), '2026-11-05');
+    assert.equal(c.paid_method, 'Zelle');
+    assert.ok(stages().Paid);
+    // Undo and pay again.
+    await post(`/cleanings/${id}/paid`, { undo: '1' });
+    assert.equal(app.service.get(id).status, 'completed');
+    await post(`/cleanings/${id}/paid`, { amount: '145.50', paid_on: '2026-11-06', method: 'Venmo' });
+
+    // Paying straight from "not cleaned yet" with an amount does all three steps.
+    const two = (await app.service.addManual('2026-11-20', null, 'Mark', { alreadyArranged: true })).cleaning.id;
+    await post(`/cleanings/${two}/paid`, { amount: '120', paid_on: '2026-11-21', method: 'Cash' });
+    c = app.service.get(two);
+    assert.deepEqual([c.status, c.amount_cents], ['paid', 12000]);
+    // A 2025 payment doesn't count in 2026.
+    const old = (await app.service.addManual('2026-11-25', null, 'Mark', { alreadyArranged: true })).cleaning.id;
+    await post(`/cleanings/${old}/paid`, { amount: '99', paid_on: '2025-12-30', method: 'Check' });
+
+    const pay = await (await fetch(`${base}/payments?year=2026`, { headers: auth })).text();
+    assert.match(pay, /2026 total paid to Jenn: <b>\$265\.50<\/b> for 2 cleanings/);
+    assert.match(pay, /<option selected>2026<\/option><option >2025<\/option>/);
+    const csv = await fetch(`${base}/payments.csv?year=2026`, { headers: auth });
+    assert.match(csv.headers.get('content-disposition'), /cleaning-payments-2026\.csv/);
+    const lines = (await csv.text()).trim().split('\r\n');
+    assert.equal(lines[0], 'Paid on,Cleaning date,Paid to,Amount (USD),Method,Property,Cleaning ID');
+    assert.equal(lines[1], `"2026-11-06","2026-11-04","Jenn","145.50","Venmo","2072 Slalom Ct","${id}"`);
+    assert.equal(lines[3], '"","","Total","265.50","","",""');
+  } finally { app.stop(); }
 });
 
 test('Airbnb cancellation: phone alert, and tapping it offers to text Jenn only if she was texted', async () => {
