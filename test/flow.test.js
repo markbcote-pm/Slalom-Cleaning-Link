@@ -952,7 +952,7 @@ test('A new Airbnb booking sends a phone notification that opens its cleaning fo
 });
 
 test('Cleaning steps are tappable: cleaned, price quoted, paid (with date and method), undo; yearly records and spreadsheet download', async () => {
-  const app = createApp(loadConfig({ DOTENV: '0', DB_FILE: ':memory:', DRY_RUN: '1', ADMIN_PASSWORD: 'pw', APPROVERS: 'Mark:+12075550000:', CLEANER: 'Jenn:', CLEANING_FEE: '0', TIMEZONE: 'America/Los_Angeles' }));
+  const app = createApp(loadConfig({ DOTENV: '0', DB_FILE: ':memory:', DRY_RUN: '1', ADMIN_PASSWORD: 'pw', APPROVERS: 'Mark:+12075550000:,Danielle:+18315550000:', CLEANER: 'Jenn:', CLEANING_FEE: '0', TIMEZONE: 'America/Los_Angeles' }));
   await new Promise(r => app.server.listen(0, r));
   const base = `http://127.0.0.1:${app.server.address().port}`;
   const auth = { Authorization: 'Basic ' + Buffer.from('x:pw').toString('base64') };
@@ -981,17 +981,22 @@ test('Cleaning steps are tappable: cleaned, price quoted, paid (with date and me
     page = await (await fetch(`${base}/cleanings/${id}`, { headers: auth })).text();
     assert.match(page, /Price quoted: <b>\$145\.50<\/b>, not paid yet/);
 
-    // Paid on a chosen date by Zelle.
-    await post(`/cleanings/${id}/paid`, { amount: '145.50', paid_on: '2026-11-05', method: 'Zelle' });
+    // The paid dialog asks who paid, defaulting to whoever is signed in.
+    assert.match(page, /Who paid<br><select name="paid_by"[^>]*><option selected>Mark<\/option><option >Danielle<\/option><\/select>/);
+    // Paid on a chosen date by Zelle, by Danielle.
+    await post(`/cleanings/${id}/paid`, { amount: '145.50', paid_on: '2026-11-05', method: 'Zelle', paid_by: 'Danielle' });
     let c = app.service.get(id);
     assert.equal(c.status, 'paid');
     assert.equal(c.paid_at.slice(0, 10), '2026-11-05');
     assert.equal(c.paid_method, 'Zelle');
+    assert.equal(c.paid_by, 'Danielle');
+    assert.match(await (await fetch(`${base}/cleanings/${id}`, { headers: auth })).text(), /Paid <b>\$145\.50<\/b> on Thu, Nov 5 by Danielle via Zelle\./);
     assert.ok(stages().Paid);
     // Undo and pay again.
     await post(`/cleanings/${id}/paid`, { undo: '1' });
     assert.equal(app.service.get(id).status, 'completed');
-    await post(`/cleanings/${id}/paid`, { amount: '145.50', paid_on: '2026-11-06', method: 'Venmo' });
+    assert.equal(app.service.get(id).paid_by, null);
+    await post(`/cleanings/${id}/paid`, { amount: '145.50', paid_on: '2026-11-06', method: 'Venmo', paid_by: 'Mark' });
 
     // Paying straight from "not cleaned yet" with an amount does all three steps.
     const two = (await app.service.addManual('2026-11-20', null, 'Mark', { alreadyArranged: true })).cleaning.id;
@@ -1008,9 +1013,9 @@ test('Cleaning steps are tappable: cleaned, price quoted, paid (with date and me
     const csv = await fetch(`${base}/payments.csv?year=2026`, { headers: auth });
     assert.match(csv.headers.get('content-disposition'), /cleaning-payments-2026\.csv/);
     const lines = (await csv.text()).trim().split('\r\n');
-    assert.equal(lines[0], 'Paid on,Cleaning date,Paid to,Amount (USD),Method,Property,Cleaning ID');
-    assert.equal(lines[1], `"2026-11-06","2026-11-04","Jenn","145.50","Venmo","2072 Slalom Ct","${id}"`);
-    assert.equal(lines[3], '"","","Total","265.50","","",""');
+    assert.equal(lines[0], 'Paid on,Cleaning date,Paid to,Amount (USD),Paid by,Method,Property,Cleaning ID');
+    assert.equal(lines[1], `"2026-11-06","2026-11-04","Jenn","145.50","Mark","Venmo","2072 Slalom Ct","${id}"`);
+    assert.equal(lines[3], '"","","Total","265.50","","","",""');
   } finally { app.stop(); }
 });
 

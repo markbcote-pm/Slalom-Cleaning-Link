@@ -389,7 +389,7 @@ function stateBanner(c, config) {
 
 // The step pills on a cleaning. Cleaned, price quoted and paid can be tapped to record them.
 const STEP_LABEL = { 'Payment requested': 'Price quoted' };
-function stepPills(c, service, config) {
+function stepPills(c, service, config, who) {
   const live = !['cancelled', 'declined', 'awaiting_approval'].includes(c.status);
   const tap = { 'Cleaner confirmed': live && c.group_known_date === c.date && !['completed', 'paid'].includes(c.status) ? 'confirm-dialog' : null,
     Cleaned: live ? 'cleaned-dialog' : null, 'Payment requested': live ? 'quote-dialog' : null, Paid: live ? 'paid-dialog' : null };
@@ -414,9 +414,10 @@ function stepPills(c, service, config) {
 ${c.status === 'paid' ? `<p><b>${money(c.amount_cents)}</b>, already paid.</p><div class="dialog-actions">${close}</div>` : `<label class="muted">Amount ($)<br><input name="amount" type="number" min="1" step="0.01" inputmode="decimal" value="${dollars}" required style="width:100%"></label>
 ${!done ? '<p class="muted">Saving a price also marks the cleaning as cleaned.</p>' : ''}<div class="dialog-actions"><button>Save price</button>${close}</div>`}</form></dialog>
 <dialog id="paid-dialog"><form method="post" action="/cleanings/${c.id}/paid"><h2>${c.status === 'paid' ? 'Paid' : 'Mark as paid'}</h2>
-${c.status === 'paid' ? `<p><b>${money(c.amount_cents)}</b> paid ${h(prettyDate(c.paid_at.slice(0, 10)))}${c.paid_method ? ` by ${h(c.paid_method)}` : ''}.</p><div class="dialog-actions"><button name="undo" value="1" class="ghost">Undo payment</button>${close}</div>`
+${c.status === 'paid' ? `<p><b>${money(c.amount_cents)}</b> paid ${h(prettyDate(c.paid_at.slice(0, 10)))}${c.paid_by ? ` by ${h(c.paid_by)}` : ''}${c.paid_method ? ` via ${h(c.paid_method)}` : ''}.</p><div class="dialog-actions"><button name="undo" value="1" class="ghost">Undo payment</button>${close}</div>`
     : `<label class="muted">Amount ($)<br><input name="amount" type="number" min="1" step="0.01" inputmode="decimal" value="${dollars}" required style="width:100%"></label>
 <label class="muted">Date paid<br><input name="paid_on" type="date" value="${today}" max="${today}" required style="width:100%"></label>
+<label class="muted">Who paid<br><select name="paid_by" style="width:100%">${payerOptions(config, who)}</select></label>
 <label class="muted">How<br><select name="method" style="width:100%">${methods}</select></label>
 <div class="dialog-actions"><button>Mark paid</button>${close}</div>`}</form></dialog>
 <script>
@@ -428,7 +429,7 @@ document.querySelectorAll('dialog [data-close]').forEach(b => b.addEventListener
 function paymentRow(c, config) {
   if (c.amount_cents == null && c.status !== 'paid') return '';
   return `<p style="margin:8px 0 0">${c.status === 'paid'
-    ? `Paid <b>${money(c.amount_cents)}</b> on ${h(prettyDate(c.paid_at.slice(0, 10)))}${c.paid_method ? ` by ${h(c.paid_method)}` : ''}.`
+    ? `Paid <b>${money(c.amount_cents)}</b> on ${h(prettyDate(c.paid_at.slice(0, 10)))}${c.paid_by ? ` by ${h(c.paid_by)}` : ''}${c.paid_method ? ` via ${h(c.paid_method)}` : ''}.`
     : `Price quoted: <b>${money(c.amount_cents)}</b>, not paid yet.`}</p>`;
 }
 
@@ -446,7 +447,7 @@ export function cleaningPage({ config, db, who, service, id }) {
   const stayText = (b) => b ? `${h(guestLabel(b))}, ${h(prettyDate(b.check_in))} to ${h(prettyDate(b.check_out))}` : 'None';
   return layout(`Cleaning ${prettyDate(c.date)}`, `${header({ config, db, who, active: 'calendar' })}
 <div class="card"><p><a href="/?month=${c.date.slice(0, 7)}">&lsaquo; Calendar</a></p><h2>Cleaning ${h(prettyDate(c.date))}</h2>
-${stepPills(c, service, config)}
+${stepPills(c, service, config, who)}
 ${stateBanner(c, config)}
 ${paymentRow(c, config)}
 <table style="margin-top:10px"><tr><th>After the stay of</th><td>${stayText(stay)}</td></tr><tr><th>Before the stay of</th><td>${stayText(nextStay)}</td></tr>
@@ -631,9 +632,12 @@ function ledgerCard(db, config, year) {
 <div class="row"><form method="get" action="/payments" class="row"><select name="year" onchange="this.form.submit()">${[...new Set([year, ...years])].sort().reverse().map(y => `<option ${y === year ? 'selected' : ''}>${h(y)}</option>`).join('')}</select></form>
 <a class="btn ghost" href="/payments.csv?year=${h(year)}" download>Download ${h(year)} (spreadsheet)</a></div>
 <p>${h(year)} total paid to ${cleaner}: <b>${money(total)}</b> for ${rows.length} cleaning${rows.length === 1 ? '' : 's'}.</p>
-${rows.length ? `<div class="scroll"><table><tr><th>Paid on</th><th>Cleaning</th><th>Amount</th><th>How</th></tr>${rows.map(c => `<tr><td>${h(prettyDate(c.paid_at.slice(0, 10)))}</td><td><a href="/cleanings/${c.id}">${h(prettyDate(c.date))}</a></td><td>${money(c.amount_cents)}</td><td>${h(c.paid_method || '')}</td></tr>`).join('')}</table></div>` : '<p class="muted">No payments recorded for this year.</p>'}
+${rows.length ? `<div class="scroll"><table><tr><th>Paid on</th><th>Cleaning</th><th>Amount</th><th>Paid by</th><th>How</th></tr>${rows.map(c => `<tr><td>${h(prettyDate(c.paid_at.slice(0, 10)))}</td><td><a href="/cleanings/${c.id}">${h(prettyDate(c.date))}</a></td><td>${money(c.amount_cents)}</td><td>${h(c.paid_by || '')}</td><td>${h(c.paid_method || '')}</td></tr>`).join('')}</table></div>` : '<p class="muted">No payments recorded for this year.</p>'}
 <p class="muted">Counted by the date you paid. The download opens in Excel, Numbers or Google Sheets for your tax records.</p></div>`;
 }
+
+// The owners, for "Who paid". The person signed in is picked first.
+const payerOptions = (config, who) => config.approvers.map(a => `<option ${a.name === who ? 'selected' : ''}>${h(a.name)}</option>`).join('');
 
 export const paidInYear = (db, year) => db.prepare("SELECT * FROM cleanings WHERE status='paid' AND substr(paid_at,1,4)=? ORDER BY paid_at, date").all(String(year));
 
@@ -641,9 +645,9 @@ export function paymentsCsv(db, config, year) {
   const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const rows = paidInYear(db, year);
   const total = rows.reduce((t, c) => t + (c.amount_cents || 0), 0);
-  return ['Paid on,Cleaning date,Paid to,Amount (USD),Method,Property,Cleaning ID',
-    ...rows.map(c => [c.paid_at.slice(0, 10), c.date, config.cleaner?.name || 'Cleaner', (c.amount_cents / 100).toFixed(2), c.paid_method || '', config.propertyName, c.id].map(q).join(',')),
-    ['', '', 'Total', (total / 100).toFixed(2), '', '', ''].map(q).join(',')].join('\r\n') + '\r\n';
+  return ['Paid on,Cleaning date,Paid to,Amount (USD),Paid by,Method,Property,Cleaning ID',
+    ...rows.map(c => [c.paid_at.slice(0, 10), c.date, config.cleaner?.name || 'Cleaner', (c.amount_cents / 100).toFixed(2), c.paid_by || '', c.paid_method || '', config.propertyName, c.id].map(q).join(',')),
+    ['', '', 'Total', (total / 100).toFixed(2), '', '', '', ''].map(q).join(',')].join('\r\n') + '\r\n';
 }
 
 export function paymentsPage({ config, db, who, year = null }) {
@@ -656,14 +660,14 @@ export function paymentsPage({ config, db, who, year = null }) {
   const owedRows = owed.map(c => `<tr><td><input type="checkbox" name="id" value="${c.id}" checked></td><td>${h(prettyDate(c.date))}</td><td>${money(c.amount_cents)}</td></tr>`).join('');
   const owedTotal = owed.reduce((s, c) => s + (c.amount_cents || 0), 0);
   const recentPaid = db.prepare("SELECT * FROM cleanings WHERE status='paid' ORDER BY paid_at DESC LIMIT 12").all()
-    .map(c => `<tr><td>${h(prettyDate(c.date))}</td><td>${money(c.amount_cents)}</td><td>${h(c.paid_method || '')}</td><td class="muted">${h(c.paid_at?.slice(0, 10))}</td></tr>`).join('');
+    .map(c => `<tr><td>${h(prettyDate(c.date))}</td><td>${money(c.amount_cents)}</td><td>${h([c.paid_by, c.paid_method].filter(Boolean).join(', '))}</td><td class="muted">${h(c.paid_at?.slice(0, 10))}</td></tr>`).join('');
   return layout('Payments', `${header({ config, db, who, active: 'payments' })}
 <div class="card"><h2>Cleaner payments</h2>
 <p>Owed now: <b>${money(owedTotal)}</b> for ${owed.length} cleaning(s) · Paid this year: ${money(paidYear.s)} (${paidYear.n})</p>
 ${awaitingBill.length ? `<h2 style="margin-top:14px">Cleaned, waiting for ${cleanerName}'s request</h2><p class="muted">When ${cleanerName} asks to be paid, enter the amount here.</p><table>
 ${awaitingBill.map(c => `<tr><td>${h(prettyDate(c.date))}</td><td><form method="post" action="/payments/request" class="row"><input type="hidden" name="id" value="${c.id}"><input name="amount" type="number" min="1" step="0.01" placeholder="Amount $" required style="width:120px"><button class="ghost">Save request</button></form></td></tr>`).join('')}</table>` : ''}
 ${owed.length ? `<h2 style="margin-top:14px">Requested, not paid yet</h2><form method="post" action="/payments/paid"><table><tr><th></th><th>Cleaning</th><th>Amount</th></tr>${owedRows}</table>
-<div class="row" style="margin-top:10px"><select name="method"><option>Venmo</option><option>Zelle</option><option>Cash</option><option>Check</option><option>Other</option></select><button>Mark selected paid</button></div></form>` : ''}
+<div class="row" style="margin-top:10px"><select name="paid_by" aria-label="Who paid">${payerOptions(config, who)}</select><select name="method"><option>Venmo</option><option>Zelle</option><option>Cash</option><option>Check</option><option>Other</option></select><button>Mark selected paid</button></div></form>` : ''}
 ${recentPaid ? `<h2 style="margin-top:14px">Recently paid</h2><table>${recentPaid}</table>` : ''}</div>
 ${ledgerCard(db, config, year)}`);
 }

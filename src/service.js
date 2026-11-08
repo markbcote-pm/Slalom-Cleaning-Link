@@ -461,14 +461,14 @@ export function createService({ db, config, notifier }) {
   }
 
   // paidOn (YYYY-MM-DD) is the day the money went out, for the year-end records.
-  function markPaid(ids, method, by, paidOn = null) {
+  function markPaid(ids, method, by, paidOn = null, paidBy = null) {
     const at = paidOn && /^\d{4}-\d{2}-\d{2}$/.test(paidOn) ? `${paidOn}T12:00:00.000Z` : nowIso();
     return tx(db, () => {
       for (const id of ids) {
         const c = get(id);
         if (!c || c.status !== 'completed' || c.amount_cents == null) continue;
-        update(id, { status: 'paid', paid_at: at, paid_method: method || null });
-        logEvent(id, 'Paid', `$${(c.amount_cents / 100).toFixed(2)}${method ? ` by ${method}` : ''} on ${at.slice(0, 10)}, marked by ${by}`);
+        update(id, { status: 'paid', paid_at: at, paid_method: method || null, paid_by: paidBy || null });
+        logEvent(id, 'Paid', `$${(c.amount_cents / 100).toFixed(2)}${paidBy ? ` paid by ${paidBy}` : ''}${method ? ` by ${method}` : ''} on ${at.slice(0, 10)}, marked by ${by}`);
       }
     });
   }
@@ -476,7 +476,7 @@ export function createService({ db, config, notifier }) {
   function unmarkPaid(id, by) {
     const c = get(id);
     if (!c || c.status !== 'paid') return null;
-    update(id, { status: 'completed', paid_at: null, paid_method: null });
+    update(id, { status: 'completed', paid_at: null, paid_method: null, paid_by: null });
     logEvent(id, 'Payment undone', `by ${by}`);
     return get(id);
   }
