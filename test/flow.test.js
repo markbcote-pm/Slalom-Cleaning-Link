@@ -456,7 +456,7 @@ test('Review on the calendar: approve without texting, approve and text after pr
     const inbox = await (await fetch(base + '/inbox', { headers: auth })).text();
     assert.match(inbox, new RegExp(`href="/\\?month=2026-11&review=${c1.id}">Review<`));
     const cal = await (await fetch(`${base}/?month=2026-11&review=${c1.id}`, { headers: auth })).text();
-    assert.match(cal, /class="day\s+review" data-date="2026-11-08"/);
+    assert.match(cal, /class="day [^"]*\breview" data-date="2026-11-08"/);
     assert.match(cal, new RegExp(`const review=\\{"id":${c1.id},"date":"2026-11-08"`));
 
     // Already arranged: approved, nothing texted.
@@ -994,5 +994,38 @@ test('Cleaning steps are tappable: cleaned, price quoted, paid (with date and me
     assert.equal(lines[0], 'Paid on,Cleaning date,Paid to,Amount (USD),Method,Property,Cleaning ID');
     assert.equal(lines[1], `"2026-11-06","2026-11-04","Jenn","145.50","Venmo","2072 Slalom Ct","${id}"`);
     assert.equal(lines[3], '"","","Total","265.50","","",""');
+  } finally { app.stop(); }
+});
+
+test('Airbnb cancellation: phone alert, and tapping it offers to text Jenn only if she was texted', async () => {
+  const config = loadConfig({ DOTENV: '0', DB_FILE: ':memory:', DRY_RUN: '1', ADMIN_PASSWORD: 'pw', APPROVERS: 'Mark:+15550000001:', CLEANER: 'Jenn:', TIMEZONE: 'America/Los_Angeles' });
+  const app = createApp(config, { fetchImpl: async () => ({ ok: true, status: 201 }) });
+  const news = [];
+  const orig = app.push.bookingNews;
+  app.push.bookingNews = async (r) => { const out = await orig(r); news.push(...out); return out; };
+  const sync = (stays) => app.sync({ icalText: airbnb(stays), now: NOW });
+  const all = [['s1', '2026-11-05', '2026-11-08'], ['s2', '2026-11-12', '2026-11-15'], ['s3', '2026-11-20', '2026-11-22']];
+  await sync(all);
+  // s1's cleaning was texted to the group; s2's never was.
+  const c1 = app.db.prepare("SELECT * FROM cleanings WHERE booking_uid='s1'").get();
+  await app.service.approve(c1.approval_token, 'Mark');
+  const groupBefore = app.db.prepare("SELECT COUNT(*) n FROM outbox WHERE channel='group' OR body LIKE 'CLEANING CANCELLED%'").get().n;
+
+  await sync([all[2]]);
+  assert.equal(news.length, 2);
+  const [a, b] = news;
+  assert.equal(a.title, 'Airbnb booking cancelled');
+  assert.match(a.body, /^Guest ···1234, Thu, Nov 5 to Sun, Nov 8\. The Sun, Nov 8 cleaning is cancelled\. Tap to text Jenn that it's off\.$/);
+  const token = a.url.match(/msg=([\w-]+)/)[1];
+  assert.match(b.body, /Jenn hadn't been texted, so nothing to send\.$/);
+  assert.doesNotMatch(b.url, /msg=/);
+  assert.equal(app.service.get(c1.id).status, 'cancelled');
+  // Nothing went to Jenn by itself; the link opens the usual dialog.
+  assert.equal(app.db.prepare("SELECT COUNT(*) n FROM outbox WHERE channel='group' OR body LIKE 'CLEANING CANCELLED%'").get().n, groupBefore);
+  await new Promise(r => app.server.listen(0, r));
+  try {
+    const html = await (await fetch(`http://127.0.0.1:${app.server.address().port}${a.url}`, { headers: { Authorization: 'Basic ' + Buffer.from('x:pw').toString('base64') } })).text();
+    assert.match(html, /<dialog id="msg-dialog">[\s\S]*CLEANING CANCELLED: Sun, Nov 8/);
+    assert.ok(html.includes(token));
   } finally { app.stop(); }
 });

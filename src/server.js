@@ -28,7 +28,7 @@ export function createApp(config, deps = {}) {
   const push = deps.push || createPush({ db, config, fetchImpl: deps.fetchImpl });
   const sync = async (opts = {}) => {
     const r = await syncAirbnb({ db, config, service, fetchImpl: deps.fetchImpl, ...opts });
-    if (r.newBookings?.length || r.changed?.length) {
+    if (r.newBookings?.length || r.changed?.length || r.cancelledBookings?.length) {
       try { await push.bookingNews(r); } catch (e) { console.error('Booking notification failed:', e.message); }
     }
     return r;

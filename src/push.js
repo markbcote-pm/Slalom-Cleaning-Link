@@ -115,7 +115,7 @@ export function createPush({ db, config, fetchImpl = globalThis.fetch }) {
 
   // A new Airbnb booking (or changed dates) needs Mark or Danielle to OK the cleaning and
   // text the cleaner. Tapping opens the calendar with that cleaning's review dialog.
-  async function bookingNews({ newBookings = [], changed = [] } = {}) {
+  async function bookingNews({ newBookings = [], changed = [], cancelledBookings = [] } = {}) {
     const cleaner = config.cleaner?.name || 'the cleaner';
     const out = [];
     for (const [kind, list] of [['new', newBookings], ['changed', changed]]) {
@@ -129,6 +129,20 @@ export function createPush({ db, config, fetchImpl = globalThis.fetch }) {
           url: covered ? `/?month=${b.check_in.slice(0, 7)}` : `/?month=${c.date.slice(0, 7)}&review=${c.id}` };
         out.push({ ...msg, results: await send(msg) });
       }
+    }
+    // A cancelled booking: the cleaning came off the calendar. If the cleaner had already been
+    // texted that date, tapping opens the "text the group?" dialog; nothing is sent without a tap.
+    for (const { uid, cleaning: c, message: m } of cancelledBookings) {
+      const b = db.prepare('SELECT * FROM bookings WHERE uid = ?').get(uid);
+      if (!b) continue;
+      const stay = `${guestLabel(b)}, ${prettyDate(b.check_in)} to ${prettyDate(b.check_out)}`;
+      const pending = m && m.status === 'pending';
+      const body = !c ? `${stay}. No cleaning was set for it.`
+        : pending ? `${stay}. The ${prettyDate(c.date)} cleaning is cancelled. Tap to text ${cleaner} that it's off.`
+          : `${stay}. The ${prettyDate(c.date)} cleaning is cancelled. ${cleaner} hadn't been texted, so nothing to send.`;
+      const month = (c?.date || b.check_out).slice(0, 7);
+      const msg = { title: 'Airbnb booking cancelled', body, url: pending ? `/?month=${month}&msg=${m.token}` : `/?month=${month}` };
+      out.push({ ...msg, results: await send(msg) });
     }
     return out;
   }
