@@ -33,6 +33,7 @@ export function smsInfoPage(config) {
 <h2>How people opt in</h2>
 <p>There is one way to opt in: the sign-up form at <a href="/join">${esc(config.baseUrl || '')}/join</a>. The owners send that link to the people who should get cleaning texts (themselves and their house cleaner). On the form, the person enters their name and mobile number and must tick a checkbox, which is not ticked in advance, next to this statement:</p>
 <blockquote style="margin:8px 0;padding:8px 12px;border-left:3px solid var(--accent);background:var(--win)">${esc(consentText(config))}</blockquote>
+<p><a href="/sms-optin-screenshot.png">Screenshot of the sign-up form</a>.</p>
 <p>Numbers are only texted after the form is submitted with the box ticked. The date and time of each sign-up is recorded. Right after signing up, the person receives this confirmation text:</p>
 <blockquote style="margin:8px 0;padding:8px 12px;border-left:3px solid var(--accent);background:var(--win)">${esc(confirmationText(config))}</blockquote>
 <h2>Opting out and help</h2>
