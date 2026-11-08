@@ -683,11 +683,10 @@ function textingCard(config, who, flash = '', consents = {}) {
 <tr><th>Replies come in at</th><td><code>${h(config.baseUrl)}/twilio/sms</code><div class="muted">Paste this into your Twilio number's "A message comes in" webhook (HTTP POST).</div></td></tr>
 ${missing.length ? `<tr><th>Missing in Render</th><td class="warn">${missing.join(', ')}</td></tr>` : ''}</table>
 <h2 style="margin-top:14px">Who gets texts</h2>
-<p class="muted">Before anyone gets texts, read them the consent script on the <a href="/sms">public texts page</a>. Once they say yes, tap the button: it records the date and sends them the sign-up confirmation text, as the page describes.</p>
+<p class="muted">Before anyone gets texts, send them the sign-up link <a href="/join"><code>${h(config.baseUrl)}/join</code></a>. When they submit it with the box ticked, it's recorded here and they get the confirmation text.</p>
 <table>${config.groupMembers.filter(p => p.phone).map(p => {
     const c = consents[p.phone.replace(/\D/g, '').slice(-10)];
-    return `<tr><td><b>${h(p.name)}</b><div class="muted">${h(p.phone)}</div></td><td>${c ? `Agreed ${h(new Date(c.at).toLocaleDateString('en-US', { timeZone: config.timezone, month: 'short', day: 'numeric', year: 'numeric' }))}, recorded by ${h(c.by)}` : '<span class="muted">No consent recorded</span>'}</td>
-<td><form method="post" action="/texting/consent" onsubmit="return confirm('Did ${h(p.name)} agree after hearing the script? This sends them the sign-up confirmation text.')"><input type="hidden" name="phone" value="${h(p.phone)}"><button class="ghost">${c ? 'Record again' : 'They agreed'}</button></form></td></tr>`;
+    return `<tr><td><b>${h(p.name)}</b><div class="muted">${h(p.phone)}</div></td><td>${c ? `${c.method === 'web form' ? 'Signed up on the form' : `Agreed, recorded by ${h(c.by)}`} ${h(new Date(c.at).toLocaleDateString('en-US', { timeZone: config.timezone, month: 'short', day: 'numeric', year: 'numeric' }))}` : '<span class="muted">Not signed up yet</span>'}</td></tr>`;
   }).join('')}</table>
 <form method="post" action="/texting/test" class="row" style="margin-top:10px"><button ${config.dryRun || !me?.phone ? 'disabled' : ''}>Send me a test text</button><span class="muted">${me?.phone ? `Goes only to ${h(me.name)} at ${h(me.phone)}, then checks it was delivered.` : 'No phone number on file for you.'}</span></form></div>`;
 }
