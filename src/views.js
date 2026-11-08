@@ -2,6 +2,54 @@ import { prettyDate, prettyTime, addDays, todayIn } from './dates.js';
 
 export const h = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const money = (cents) => `$${((cents || 0) / 100).toFixed(2)}`;
+// Dollars with thousands separators, for the business pages. Negative shows as -$12.00.
+export const usd = (cents) => `${cents < 0 ? '-' : ''}$${(Math.abs(cents || 0) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+// Receipt thumbnails. Photos show as small images, PDFs as a PDF tile; tapping opens the full file.
+export function receiptStrip(receipts, { deletable = false, back = '/payments' } = {}) {
+  if (!receipts.length) return '';
+  return `<div class="receipts">${receipts.map(r => `<div class="receipt"><a href="/receipts/${r.id}" target="_blank" rel="noopener" title="${h(r.name || 'Receipt')}">${r.mime === 'application/pdf' ? '<span class="thumb pdf">PDF</span>' : r.mime === 'image/heic' ? '<span class="thumb pdf">HEIC</span>' : `<img class="thumb" src="/receipts/${r.id}" alt="Receipt" loading="lazy">`}</a>${deletable ? `<form method="post" action="/receipts/${r.id}/delete" onsubmit="return confirm('Delete this receipt?')"><input type="hidden" name="next" value="${h(back)}"><button class="x" aria-label="Delete receipt">&times;</button></form>` : ''}</div>`).join('')}</div>`;
+}
+
+// Two ways to add receipts on a phone: open the camera, or pick photos/PDFs already saved.
+export const receiptInputs = (label = 'Receipts') => `<div class="upload"><div class="muted" style="font-size:14px">${h(label)}</div><div class="row">
+<label class="btn ghost">Take a photo<input type="file" name="receipt" accept="image/*" capture="environment" hidden></label>
+<label class="btn ghost">Choose photos or PDFs<input type="file" name="receipt" accept="image/*,application/pdf" multiple hidden></label></div>
+<div class="muted upl-list" style="font-size:13px"></div></div>`;
+
+// Shrinks big phone photos before upload (about 2000px, JPEG) and sends the form with fetch.
+export const UPLOAD_JS = `<script>
+(function(){
+  async function shrink(f){
+    if(!/^image\\/(jpeg|png|webp)$/.test(f.type) || f.size < 1200000 || !window.createImageBitmap) return f;
+    try{ const b = await createImageBitmap(f, {imageOrientation:'from-image'});
+      const s = Math.min(1, 2000/Math.max(b.width, b.height)), c = document.createElement('canvas');
+      c.width = Math.round(b.width*s); c.height = Math.round(b.height*s); c.getContext('2d').drawImage(b, 0, 0, c.width, c.height);
+      const out = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.82));
+      return out && out.size < f.size ? new File([out], f.name.replace(/\\.[^.]+$/, '') + '.jpg', {type:'image/jpeg'}) : f;
+    }catch(e){ return f; }
+  }
+  document.querySelectorAll('form[data-upload]').forEach(form => {
+    const list = form.querySelector('.upl-list');
+    const picked = () => [...form.querySelectorAll('input[type=file]')].flatMap(i => [...i.files]);
+    form.querySelectorAll('input[type=file]').forEach(i => i.addEventListener('change', () => {
+      const n = picked().length; if (list) list.textContent = n ? n + ' file' + (n === 1 ? '' : 's') + ' ready: ' + picked().map(f => f.name).join(', ') : '';
+      if (form.dataset.autosubmit !== undefined && n) form.requestSubmit();
+    }));
+    form.addEventListener('submit', async e => {
+      e.preventDefault();
+      const btn = form.querySelector('button[type=submit],button:not([type])'); if (btn) { btn.disabled = true; btn.dataset.label = btn.textContent; btn.textContent = 'Saving...'; }
+      const fd = new FormData();
+      for (const [k, v] of new FormData(form)) { if (v instanceof File) { if (v.size) fd.append(k, await shrink(v), v.name); } else fd.append(k, v); }
+      try { const r = await fetch(form.action, {method:'POST', body:fd});
+        if (r.ok && r.redirected) { location.href = r.url; return; }
+        const t = await r.text(); alert(r.ok ? 'Saved.' : (t.replace(/<[^>]+>/g, ' ').trim().slice(0, 300) || 'Could not save.')); if (r.ok) location.reload();
+      } catch (err) { alert('Could not save. Check your connection and try again.'); }
+      if (btn) { btn.disabled = false; btn.textContent = btn.dataset.label; }
+    });
+  });
+})();
+</script>`;
 
 const CSS = `
 :root{--bg:#f7f6f3;--card:#fff;--ink:#1d1d1b;--muted:#6b6a66;--line:#e4e2dc;--accent:#2f6f5e;--accent-ink:#fff;--warn:#a5551b;--chip:#e3f0ec;--chip-ink:#1f4f42;--pending:#fbefd9;--pending-ink:#7a4a10;--stay:#3d5a80;--stay-ink:#fff;--win:#eef6f2;--win-ink:#2f6f5e;--win-line:#8fbfae;--tight:#b3412e;--tight-ring:#ffb199;--s-pending:#a16207;--s-missing:#d9480f;--s-past:#8a939e;--w-missing:#fff0e6;--w-missing-ink:#a8360a;--out:#efeee9;--c-prop:#fdf3e1;--c-prop-ink:#7a4a10;--c-prop-line:#c8912f;--c-asked:#ece7fc;--c-asked-ink:#4a3593;--c-asked-line:#8d78d9;--c-ok:#2f6f5e;--c-ok-ink:#fff;--c-past:#efeee9;--c-past-ink:#8a8780;--c-past-line:#d9d7d0}
@@ -58,6 +106,15 @@ details summary{cursor:pointer;font-size:13px}label{font-size:14px}
 dialog{border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink);padding:18px;width:min(440px,calc(100vw - 32px))}dialog::backdrop{background:rgba(0,0,0,.4)}
 .personal-add{margin-top:14px;border-top:1px solid var(--line);padding-top:10px}.personal-add summary{font-weight:600}
 .dialog-actions{display:flex;flex-direction:column;gap:8px;margin-top:12px}code{word-break:break-all}
+.kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:6px 0 4px}.kpi{border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-width:0}.kpi span{font-size:13px;color:var(--muted)}.kpi b{display:block;font-size:22px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.kpi.good b{color:var(--accent)}.kpi.bad b{color:var(--tight)}
+@media (max-width:480px){.kpi{padding:8px}.kpi b{font-size:17px}}
+.num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}tr.total td{font-weight:700}.sub{font-size:13px;color:var(--muted)}
+.receipts{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}.receipt{position:relative}.thumb{width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--muted);background:var(--bg);text-decoration:none}
+.receipt .x{position:absolute;top:-7px;right:-7px;width:20px;height:20px;padding:0;border-radius:99px;background:var(--tight);color:#fff;font-size:14px;line-height:1}
+.upload{margin:10px 0}.upload .btn{font-size:14px}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.form-grid label{display:flex;flex-direction:column;gap:3px}.form-grid .wide{grid-column:1/-1}.form-grid input,.form-grid select{width:100%}
+@media (max-width:480px){.form-grid{grid-template-columns:1fr}}
+.tag.none{background:var(--w-missing);color:var(--w-missing-ink)}.h3{font-size:15px;margin:16px 0 6px}
+@media print{.tabs,.topbar,.noprint{display:none!important}.card{border:0;padding:0}body{background:#fff;color:#000}}
 `;
 
 export function layout(title, body) {
@@ -433,7 +490,7 @@ function paymentRow(c, config) {
     : `Price quoted: <b>${money(c.amount_cents)}</b>, not paid yet.`}</p>`;
 }
 
-export function cleaningPage({ config, db, who, service, id }) {
+export function cleaningPage({ config, db, who, service, id, receipts = [] }) {
   const c = service.get(id);
   if (!c) return null;
   const stay = db.prepare("SELECT * FROM bookings WHERE status='active' AND check_out <= ? ORDER BY check_out DESC LIMIT 1").get(c.date);
@@ -450,6 +507,8 @@ export function cleaningPage({ config, db, who, service, id }) {
 ${stepPills(c, service, config, who)}
 ${stateBanner(c, config)}
 ${paymentRow(c, config)}
+${['completed', 'paid'].includes(c.status) ? `<div class="h3">Payment receipts</div>${receiptStrip(receipts, { deletable: true, back: `/cleanings/${c.id}` })}
+<form method="post" action="/cleanings/${c.id}/receipt" enctype="multipart/form-data" data-upload data-autosubmit>${receiptInputs(receipts.length ? 'Add another (Venmo screenshot, invoice)' : 'Add a Venmo screenshot or invoice')}</form>${UPLOAD_JS}` : ''}
 <table style="margin-top:10px"><tr><th>After the stay of</th><td>${stayText(stay)}</td></tr><tr><th>Before the stay of</th><td>${stayText(nextStay)}</td></tr>
 ${c.note ? `<tr><th>Note</th><td>${h(c.note)}</td></tr>` : ''}</table></div>
 <div class="card"><h2>Notes</h2>${notes.length ? `<ul class="notes">${notes.map(n => noteItem(n, { config, cleanings, showCleaning: false })).join('')}</ul>` : '<p class="muted">No notes for this cleaning yet.</p>'}
@@ -623,19 +682,6 @@ function personalCard(bookings, today) {
 ${rows ? `<div class="scroll" style="margin-top:10px"><table>${rows}</table></div>` : ''}</div>`;
 }
 
-function ledgerCard(db, config, year) {
-  const years = db.prepare("SELECT DISTINCT substr(paid_at,1,4) y FROM cleanings WHERE status='paid' AND paid_at IS NOT NULL ORDER BY y DESC").all().map(r => r.y);
-  const rows = paidInYear(db, year);
-  const total = rows.reduce((t, c) => t + (c.amount_cents || 0), 0);
-  const cleaner = h(config.cleaner?.name || 'Cleaner');
-  return `<div class="card" id="records"><h2>Payment records</h2>
-<div class="row"><form method="get" action="/payments" class="row"><select name="year" onchange="this.form.submit()">${[...new Set([year, ...years])].sort().reverse().map(y => `<option ${y === year ? 'selected' : ''}>${h(y)}</option>`).join('')}</select></form>
-<a class="btn ghost" href="/payments.csv?year=${h(year)}" download>Download ${h(year)} (spreadsheet)</a></div>
-<p>${h(year)} total paid to ${cleaner}: <b>${money(total)}</b> for ${rows.length} cleaning${rows.length === 1 ? '' : 's'}.</p>
-${rows.length ? `<div class="scroll"><table><tr><th>Paid on</th><th>Cleaning</th><th>Amount</th><th>Paid by</th><th>How</th></tr>${rows.map(c => `<tr><td>${h(prettyDate(c.paid_at.slice(0, 10)))}</td><td><a href="/cleanings/${c.id}">${h(prettyDate(c.date))}</a></td><td>${money(c.amount_cents)}</td><td>${h(c.paid_by || '')}</td><td>${h(c.paid_method || '')}</td></tr>`).join('')}</table></div>` : '<p class="muted">No payments recorded for this year.</p>'}
-<p class="muted">Counted by the date you paid. The download opens in Excel, Numbers or Google Sheets for your tax records.</p></div>`;
-}
-
 // The owners, for "Who paid". The person signed in is picked first.
 const payerOptions = (config, who) => config.approvers.map(a => `<option ${a.name === who ? 'selected' : ''}>${h(a.name)}</option>`).join('');
 
@@ -650,8 +696,8 @@ export function paymentsCsv(db, config, year) {
     ['', '', 'Total', (total / 100).toFixed(2), '', '', '', ''].map(q).join(',')].join('\r\n') + '\r\n';
 }
 
-export function paymentsPage({ config, db, who, year = null }) {
-  year = /^\d{4}$/.test(year || '') ? year : todayIn(config.timezone).slice(0, 4);
+// What the cleaner is owed right now. Shown on the Payments page only when there is something to do.
+export function cleanerCard({ config, db, who }) {
   const today = todayIn(config.timezone);
   const owed = db.prepare("SELECT * FROM cleanings WHERE status='completed' AND amount_cents IS NOT NULL ORDER BY date").all();
   const awaitingBill = db.prepare("SELECT * FROM cleanings WHERE status='completed' AND amount_cents IS NULL ORDER BY date").all();
@@ -659,17 +705,14 @@ export function paymentsPage({ config, db, who, year = null }) {
   const paidYear = db.prepare("SELECT COALESCE(SUM(amount_cents),0) s, COUNT(*) n FROM cleanings WHERE status='paid' AND substr(paid_at,1,4)=?").get(today.slice(0, 4));
   const owedRows = owed.map(c => `<tr><td><input type="checkbox" name="id" value="${c.id}" checked></td><td>${h(prettyDate(c.date))}</td><td>${money(c.amount_cents)}</td></tr>`).join('');
   const owedTotal = owed.reduce((s, c) => s + (c.amount_cents || 0), 0);
-  const recentPaid = db.prepare("SELECT * FROM cleanings WHERE status='paid' ORDER BY paid_at DESC LIMIT 12").all()
-    .map(c => `<tr><td>${h(prettyDate(c.date))}</td><td>${money(c.amount_cents)}</td><td>${h([c.paid_by, c.paid_method].filter(Boolean).join(', '))}</td><td class="muted">${h(c.paid_at?.slice(0, 10))}</td></tr>`).join('');
-  return layout('Payments', `${header({ config, db, who, active: 'payments' })}
-<div class="card"><h2>Cleaner payments</h2>
+  if (!owed.length && !awaitingBill.length) return '';
+  return `<div class="card" id="cleaner"><h2>Pay ${cleanerName}</h2>
 <p>Owed now: <b>${money(owedTotal)}</b> for ${owed.length} cleaning(s) · Paid this year: ${money(paidYear.s)} (${paidYear.n})</p>
 ${awaitingBill.length ? `<h2 style="margin-top:14px">Cleaned, waiting for ${cleanerName}'s request</h2><p class="muted">When ${cleanerName} asks to be paid, enter the amount here.</p><table>
 ${awaitingBill.map(c => `<tr><td>${h(prettyDate(c.date))}</td><td><form method="post" action="/payments/request" class="row"><input type="hidden" name="id" value="${c.id}"><input name="amount" type="number" min="1" step="0.01" placeholder="Amount $" required style="width:120px"><button class="ghost">Save request</button></form></td></tr>`).join('')}</table>` : ''}
 ${owed.length ? `<h2 style="margin-top:14px">Requested, not paid yet</h2><form method="post" action="/payments/paid"><table><tr><th></th><th>Cleaning</th><th>Amount</th></tr>${owedRows}</table>
 <div class="row" style="margin-top:10px"><select name="paid_by" aria-label="Who paid">${payerOptions(config, who)}</select><select name="method"><option>Venmo</option><option>Zelle</option><option>Cash</option><option>Check</option><option>Other</option></select><button>Mark selected paid</button></div></form>` : ''}
-${recentPaid ? `<h2 style="margin-top:14px">Recently paid</h2><table>${recentPaid}</table>` : ''}</div>
-${ledgerCard(db, config, year)}`);
+</div>`;
 }
 
 function textingCard(config, who, flash = '', consents = {}) {

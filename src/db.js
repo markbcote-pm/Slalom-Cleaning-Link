@@ -86,6 +86,37 @@ CREATE TABLE IF NOT EXISTS todos (
   done_by TEXT
 );
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+-- The rental as a business: money in and out, counted on the day it moved (cash basis).
+-- Cleaner payments stay on the cleanings table and are added in as expenses when reporting.
+CREATE TABLE IF NOT EXISTS money (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL,                             -- income | expense
+  date TEXT NOT NULL,                             -- YYYY-MM-DD the money came in or went out
+  amount_cents INTEGER NOT NULL,                  -- income: what you received; expense: what you paid
+  fee_cents INTEGER,                              -- income only: Airbnb's host fee taken out before the payout
+  category TEXT NOT NULL,
+  party TEXT,                                     -- who paid you, or who you paid
+  booking_uid TEXT,                               -- the stay this income is for
+  note TEXT,
+  method TEXT,
+  paid_by TEXT,                                   -- Mark or Danielle
+  source TEXT NOT NULL DEFAULT 'manual',          -- manual | airbnb_csv
+  ext_ref TEXT UNIQUE,                            -- Airbnb import key, so re-importing doesn't double count
+  created_by TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS receipts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  money_id INTEGER,                               -- an expense or income entry
+  cleaning_id INTEGER,                            -- or a cleaner payment
+  file TEXT NOT NULL,                             -- stored under DATA_DIR/receipts
+  name TEXT,
+  mime TEXT NOT NULL,
+  bytes INTEGER NOT NULL,
+  created_by TEXT,
+  created_at TEXT NOT NULL
+);
 `;
 
 export function openDb(config) {

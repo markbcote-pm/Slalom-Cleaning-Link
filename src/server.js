@@ -9,9 +9,10 @@ import { createService } from './service.js';
 import { syncAirbnb } from './sync.js';
 import { cleaningFeed } from './feed.js';
 import { isDate, todayIn, prettyDate, localToUtc } from './dates.js';
-import { layout, messagePage, approvalPage, groupDecisionPage, dashboard, notesPage, todosPage, cleaningPage, inboxPage, staysPage, paymentsPage, paymentsCsv, morePage, loginPage } from './views.js';
+import { layout, messagePage, approvalPage, groupDecisionPage, dashboard, notesPage, todosPage, cleaningPage, inboxPage, staysPage, paymentsCsv, morePage, loginPage } from './views.js';
 import { createNotes, validTwilioSignature } from './notes.js';
 import { createPush, SERVICE_WORKER } from './push.js';
+import { createFinance, financeRoutes } from './finance.js';
 import { smsInfoPage, privacyPage, termsPage, confirmationText, joinPage } from './policy.js';
 
 const ASSETS = {
@@ -27,6 +28,8 @@ export function createApp(config, deps = {}) {
   const service = createService({ db, config, notifier });
   const notes = createNotes({ db, config });
   const push = deps.push || createPush({ db, config, fetchImpl: deps.fetchImpl });
+  const fin = createFinance({ db, config });
+  const financeRoute = financeRoutes({ db, config, fin });
   const sync = async (opts = {}) => {
     const r = await syncAirbnb({ db, config, service, fetchImpl: deps.fetchImpl, ...opts });
     if (r.newBookings?.length || r.changed?.length || r.cancelledBookings?.length) {
@@ -268,6 +271,8 @@ export function createApp(config, deps = {}) {
     const who = validName(decodeURIComponent(cookie(req, 'who') || ''));
     // Keep "Waiting on you" honest: clear proposals already covered by a confirmed cleaning.
     if (req.method === 'GET' && ['/', '/inbox', '/stays'].includes(p)) service.dropCoveredProposals(who || 'the app');
+    // Income, expenses, receipts and the CPA package (reads its own form bodies, including photo uploads).
+    if (await financeRoute({ req, res, p, url, who, send, redirect })) return;
 
     if (req.method === 'GET' && p === '/') {
       const month = /^\d{4}-\d{2}$/.test(url.searchParams.get('month') || '') ? url.searchParams.get('month') : todayIn(config.timezone).slice(0, 7);
@@ -276,7 +281,6 @@ export function createApp(config, deps = {}) {
     if (req.method === 'GET' && p === '/notes') return send(res, 200, notesPage({ config, db, who }));
     if (req.method === 'GET' && p === '/inbox') return send(res, 200, inboxPage({ config, service, db, who }));
     if (req.method === 'GET' && p === '/stays') return send(res, 200, staysPage({ config, service, db, who, flash: url.searchParams.get('flash') }));
-    if (req.method === 'GET' && p === '/payments') return send(res, 200, paymentsPage({ config, db, who, year: url.searchParams.get('year') }));
     if (req.method === 'GET' && p === '/payments.csv') {
       const year = /^\d{4}$/.test(url.searchParams.get('year') || '') ? url.searchParams.get('year') : todayIn(config.timezone).slice(0, 4);
       return send(res, 200, paymentsCsv(db, config, year), 'text/csv; charset=utf-8', { 'Content-Disposition': `attachment; filename="cleaning-payments-${year}.csv"` });
@@ -285,7 +289,7 @@ export function createApp(config, deps = {}) {
     if (req.method === 'GET' && p === '/todos') return send(res, 200, todosPage({ config, db, who }));
     m = p.match(/^\/cleanings\/(\d+)$/);
     if (req.method === 'GET' && m) {
-      const page = cleaningPage({ config, db, who, service, id: Number(m[1]) });
+      const page = cleaningPage({ config, db, who, service, id: Number(m[1]), receipts: fin.receiptsForCleaning(Number(m[1])) });
       return page ? send(res, 200, page) : send(res, 404, 'Not found', 'text/plain');
     }
     if (req.method !== 'POST') return send(res, 404, 'Not found', 'text/plain');
@@ -509,7 +513,7 @@ export function createApp(config, deps = {}) {
   }
   const stop = () => { clearInterval(timer); server.close(); };
 
-  return { server, db, service, notes, sync, notifier, push, startBackground, stop };
+  return { server, db, service, notes, sync, notifier, push, fin, startBackground, stop };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
