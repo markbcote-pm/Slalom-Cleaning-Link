@@ -31,6 +31,8 @@ export const INCOME_CATS = [
 ];
 const CAT = Object.fromEntries([...EXPENSE_CATS, ...INCOME_CATS].map(c => [c.key, c]));
 const METHODS = ['Card', 'Bank transfer', 'Venmo', 'Zelle', 'Cash', 'Check', 'Other'];
+// Airbnb's transaction history, where hosts export earnings as a CSV.
+const AIRBNB_EARNINGS_URL = 'https://www.airbnb.com/users/transaction_history';
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 // "$1,234.56", "1234.5" or "-20" -> cents. Null when it isn't a number.
@@ -379,9 +381,12 @@ ${otherIncome.length ? `<div class="h3">Other income</div><table>${otherIncome.m
 ${noReceipt ? `<p class="sub">${noReceipt} without a receipt. Tap one to add a photo.</p>` : ''}
 ${expenseRows ? `<table style="margin-top:8px">${expenseRows}</table>` : '<p class="sub">Nothing yet. Add your first expense, and snap the receipt while you have it.</p>'}</div>
 <div class="card noprint" id="import"><h2>Import from Airbnb</h2>
-<p>Airbnb's calendar link doesn't include money, but its earnings report does. On airbnb.com, open <b>Menu &gt; Earnings</b>, choose to create a report or download your transaction history as a CSV for the year, then upload that file here.</p>
-<p class="sub">It fills in what you received and Airbnb's fee for each stay, adds guest names that are missing, and skips anything already imported, so you can import again any time.</p>
-<form method="post" action="/payments/import" enctype="multipart/form-data" class="row"><input type="file" name="csv" accept=".csv,text/csv" required><button>Import</button></form></div>
+<p class="sub" style="margin-top:0">Fills in what you received and Airbnb's fee for each stay, and adds missing guest names. Anything already imported is skipped, so import whenever you like.</p>
+<div class="form-grid">
+<a class="btn" href="${AIRBNB_EARNINGS_URL}" target="_blank" rel="noopener" style="text-align:center">1. Get the CSV from Airbnb</a>
+<form method="post" action="/payments/import" enctype="multipart/form-data"><label class="btn ghost" style="display:block;text-align:center;margin:0">2. Upload it here<input type="file" name="csv" accept=".csv,text/csv" hidden onchange="this.form.submit()"></label></form>
+</div>
+<p class="sub" style="margin-bottom:0">Step 1 opens Airbnb's transaction history: tap <b>Export CSV</b> (or <b>Download</b>) for the year. If your phone opens the Airbnb app instead, open the link in Chrome, since the app can't export. If Airbnb has moved the page, it's under <b>Menu &gt; Earnings</b>.</p></div>
 <div class="card" id="records"><h2>For your CPA</h2>
 <p>Everything for ${h(Y.year)} in one download: a spreadsheet of every amount with its tax category, a printable summary, and all receipts named by date and payee.</p>
 <div class="row noprint"><a class="btn" href="/payments/package.zip?year=${h(Y.year)}">Download ${h(Y.year)} package (.zip)</a><a class="btn ghost" href="/payments/report?year=${h(Y.year)}">Printable summary</a><a class="btn ghost" href="/payments/ledger.csv?year=${h(Y.year)}" download>Spreadsheet only</a></div>
