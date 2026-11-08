@@ -12,7 +12,7 @@ import { isDate, todayIn, prettyDate, localToUtc } from './dates.js';
 import { layout, messagePage, approvalPage, groupDecisionPage, dashboard, notesPage, todosPage, cleaningPage, inboxPage, staysPage, paymentsPage, paymentsCsv, morePage, loginPage } from './views.js';
 import { createNotes, validTwilioSignature } from './notes.js';
 import { createPush, SERVICE_WORKER } from './push.js';
-import { smsInfoPage, privacyPage, termsPage, confirmationText } from './policy.js';
+import { smsInfoPage, privacyPage, termsPage, confirmationText, joinPage } from './policy.js';
 
 const ASSETS = {
   '/icon.svg': ['icon.svg', 'image/svg+xml'], '/favicon.ico': ['icon-192.png', 'image/png'],
@@ -65,6 +65,8 @@ export function createApp(config, deps = {}) {
     const f = failures.get(ip);
     if (!f || Date.now() - f.first >= 15 * 60e3) failures.set(ip, { count: 1, first: Date.now() }); else f.count++;
   };
+  const joins = new Map();
+  const joinTries = (ip) => { const now = Date.now(), j = (joins.get(ip) || []).filter(t => now - t < 3600e3); j.push(now); joins.set(ip, j); return j.length; };
   const safeNext = (n) => /^\/(?!\/)[^\s]*$/.test(n || '') && !n.startsWith('/login') ? n : '/';
 
   const readBody = (req) => new Promise((resolve, reject) => {
@@ -99,6 +101,26 @@ export function createApp(config, deps = {}) {
     if (req.method === 'GET' && p === '/sms') return send(res, 200, smsInfoPage(config));
     if (req.method === 'GET' && p === '/privacy') return send(res, 200, privacyPage(config));
     if (req.method === 'GET' && (p === '/terms' || p === '/sms-terms')) return send(res, 200, termsPage(config));
+    if (p === '/join' && req.method === 'GET') return send(res, 200, joinPage(config));
+    if (p === '/join' && req.method === 'POST') {
+      const b = await readBody(req);
+      const name = (b.get('name') || '').trim().slice(0, 60), phone = (b.get('phone') || '').trim().slice(0, 30);
+      const digits = phone.replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '');
+      const again = (error) => send(res, 400, joinPage(config, { error, name, phone }));
+      if (b.get('consent') !== 'yes') return again('Please tick the box to agree to receive the texts.');
+      if (!name || digits.length !== 10) return again('Please enter your name and a 10-digit US mobile number.');
+      const ip = clientIp(req);
+      if (joinTries(ip) > 10) return send(res, 429, joinPage(config, { error: 'Too many sign-ups from here. Try again later.', name, phone }));
+      const member = config.groupMembers.find(x => x.phone && x.phone.replace(/\D/g, '').slice(-10) === digits);
+      db.prepare("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+        .run('consent:' + digits, JSON.stringify({ at: new Date().toISOString(), by: 'web form', method: 'web form', name, member: member?.name || null }));
+      // Only people the owners have set up get the confirmation text; anyone else is just recorded,
+      // so the form can't be used to send texts to strangers.
+      if (member) await notifier.sms(member.phone, confirmationText(config));
+      return send(res, 200, joinPage(config, { done: member
+        ? `Thanks, ${name}. A confirmation text is on its way to ${phone}. Reply STOP at any time to stop.`
+        : `Thanks, ${name}. Your sign-up is recorded. You'll start getting texts once the owners add you to the cleaning schedule.` }));
+    }
 
     // Logo, app icons and the home-screen manifest (public, so phones can fetch them).
     if (req.method === 'GET' && ASSETS[p]) {

@@ -694,21 +694,38 @@ test('Public SMS info, privacy and terms pages need no login and cover what carr
     assert.match(terms, /Message frequency varies/);
     assert.match(terms, /Reply <b>STOP<\/b>/);
     assert.equal((await fetch(base + '/sms-terms')).status, 200);
-    assert.match(await (await fetch(base + '/sms')).text(), /reads this script word for word[\s\S]*Do you agree\?/);
+    assert.match(await (await fetch(base + '/sms')).text(), /one way to opt in: the sign-up form at <a href="\/join">[\s\S]*not ticked in advance[\s\S]*I agree to receive automated text messages/);
   } finally { app.stop(); }
 });
 
-test('Recording consent stores the date and sends the sign-up confirmation text', async () => {
+test('Public sign-up form: unticked consent box required; group members get the confirmation text, strangers are only recorded', async () => {
   const { app, outbox, clearOutbox } = setup();
   await new Promise(r => app.server.listen(0, r));
   const base = `http://127.0.0.1:${app.server.address().port}`;
   const auth = { Authorization: 'Basic ' + Buffer.from('x:pw').toString('base64'), Cookie: 'who=Mark' };
+  const join = (data) => fetch(base + '/join', { method: 'POST', body: new URLSearchParams(data) });
   try {
+    const form = await (await fetch(base + '/join')).text();
+    assert.match(form, /<input type="checkbox" name="consent" value="yes" required/);
+    assert.doesNotMatch(form, /name="consent"[^>]*checked/);
+    assert.match(form, /Message and data rates may apply\. Reply STOP to opt out/);
     clearOutbox();
-    const r = await fetch(base + '/texting/consent', { method: 'POST', headers: auth, body: new URLSearchParams({ phone: '+15550000003' }), redirect: 'manual' });
-    assert.match(decodeURIComponent(r.headers.get('location')), /Consent recorded for Rosa/);
+    // Without the box: refused, nothing stored or sent.
+    assert.equal((await join({ name: 'Rosa', phone: '555-000-0003' })).status, 400);
+    assert.equal(outbox().length, 0);
+    // A group member signs up: recorded, and the confirmation text goes out.
+    const ok = await join({ name: 'Rosa', phone: '(555) 000-0003', consent: 'yes' });
+    assert.equal(ok.status, 200);
+    assert.match(await ok.text(), /confirmation text is on its way/);
+    assert.equal(outbox().length, 1);
+    assert.equal(outbox()[0].to_addr, '+15550000003');
     assert.match(outbox()[0].body, /you're signed up for cleaning schedule texts.*Reply HELP for help, STOP to opt out\./);
-    assert.match(await (await fetch(base + '/more', { headers: auth })).text(), /Rosa<\/b>[\s\S]*Agreed [A-Z][a-z]{2} \d+, \d{4}, recorded by Mark/);
+    assert.match(await (await fetch(base + '/more', { headers: auth })).text(), /Rosa<\/b>[\s\S]*Signed up on the form [A-Z][a-z]{2} \d+, \d{4}/);
+    // A stranger is recorded but never texted.
+    const other = await join({ name: 'Someone', phone: '+1 212 555 0199', consent: 'yes' });
+    assert.match(await other.text(), /once the owners add you/);
+    assert.equal(outbox().length, 1);
+    assert.ok(app.db.prepare("SELECT 1 FROM meta WHERE key = 'consent:2125550199'").get());
   } finally { app.stop(); }
 });
 
