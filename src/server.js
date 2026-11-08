@@ -68,6 +68,8 @@ export function createApp(config, deps = {}) {
   };
   const joins = new Map();
   const joinTries = (ip) => { const now = Date.now(), j = (joins.get(ip) || []).filter(t => now - t < 3600e3); j.push(now); joins.set(ip, j); return j.length; };
+  // Who paid the cleaner: one of the owners, or nobody recorded.
+  const payer = (v) => config.approvers.find(a => a.name === v)?.name || null;
   const safeNext = (n) => /^\/(?!\/)[^\s]*$/.test(n || '') && !n.startsWith('/login') ? n : '/';
 
   const readBody = (req) => new Promise((resolve, reject) => {
@@ -446,7 +448,7 @@ export function createApp(config, deps = {}) {
           const c = service.get(id);
           if (c && c.status !== 'paid' && body.get('amount') && Math.round(Number(body.get('amount')) * 100) !== c.amount_cents) service.recordPaymentRequest(id, body.get('amount'), who);
           else if (c && c.status === 'approved' && c.amount_cents != null) service.markCleaned(id, who, true);
-          service.markPaid([id], body.get('method'), who, body.get('paid_on'));
+          service.markPaid([id], body.get('method'), who, body.get('paid_on'), payer(body.get('paid_by')));
         }
       }
       return redirect(res, `/cleanings/${id}`);
@@ -456,7 +458,7 @@ export function createApp(config, deps = {}) {
       return redirect(res, '/payments');
     }
     if (p === '/payments/paid') {
-      service.markPaid(body.getAll('id').map(Number), body.get('method'), who);
+      service.markPaid(body.getAll('id').map(Number), body.get('method'), who, null, payer(body.get('paid_by')));
       return redirect(res, '/payments');
     }
     return send(res, 404, 'Not found', 'text/plain');

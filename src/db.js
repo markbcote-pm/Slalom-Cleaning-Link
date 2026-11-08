@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS cleanings (
   amount_cents INTEGER,
   paid_at TEXT,
   paid_method TEXT,
+  paid_by TEXT,
   sequence INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
@@ -103,6 +104,7 @@ export function openDb(config) {
   // Cleaner confirmation: set when Mark marks that Jenn said yes, or when a cleaning was
   // arranged with her directly. Older arranged cleanings are backfilled from their history.
   const ccols = db.prepare('PRAGMA table_info(cleanings)').all().map(c => c.name);
+  if (!ccols.includes('paid_by')) db.exec('ALTER TABLE cleanings ADD COLUMN paid_by TEXT');  // Mark or Danielle
   if (!ccols.includes('cleaner_confirmed_at')) {
     db.exec('ALTER TABLE cleanings ADD COLUMN cleaner_confirmed_at TEXT');
     db.exec(`UPDATE cleanings SET cleaner_confirmed_at = updated_at WHERE group_known_date = date AND id IN
