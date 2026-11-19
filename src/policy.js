@@ -31,10 +31,10 @@ export function smsInfoPage(config) {
 <h2>Who receives these texts</h2>
 <p>Only the home's owners and their house cleaner. No marketing messages are ever sent.</p>
 <h2>How people opt in</h2>
-<p>There is one way to opt in: the sign-up form at <a href="/join">${esc(config.baseUrl || '')}/join</a>. The owners send that link to the people who should get cleaning texts (themselves and their house cleaner). On the form, the person enters their name and mobile number and must tick a checkbox, which is not ticked in advance, next to this statement:</p>
+<p>There is one way to opt in: the form at <a href="/join">${esc(config.baseUrl || '')}/join</a>. The owners send that link to the people on the cleaning schedule (themselves and their house cleaner). On the form, the person enters their name and mobile number. Agreeing to texts is optional and separate: it is a checkbox, not ticked in advance and not required, next to this statement:</p>
 <blockquote style="margin:8px 0;padding:8px 12px;border-left:3px solid var(--accent);background:var(--win)">${esc(consentText(config))}</blockquote>
 <p><a href="/sms-optin-screenshot.png">Screenshot of the sign-up form</a>.</p>
-<p>Numbers are only texted after the form is submitted with the box ticked. The date and time of each sign-up is recorded. Right after signing up, the person receives this confirmation text:</p>
+<p>The form can be submitted without ticking the box; that person is added to the schedule but is never texted. Numbers are only texted after the form is submitted with the box ticked. The date and time of each sign-up is recorded. Right after signing up, the person receives this confirmation text:</p>
 <blockquote style="margin:8px 0;padding:8px 12px;border-left:3px solid var(--accent);background:var(--win)">${esc(confirmationText(config))}</blockquote>
 <h2>Opting out and help</h2>
 <p>Reply <b>STOP</b> to stop all messages. Reply <b>HELP</b> for help. For anything else, ${contactLine(config)}.</p>
@@ -74,19 +74,22 @@ export function termsPage(config) {
 ${nav}</div>`);
 }
 
-// The public sign-up form: the single opt-in path. The checkbox is never pre-ticked.
-export function joinPage(config, { error = '', done = '', name = '', phone = '' } = {}) {
-  if (done) return layout('Signed up', `<div class="card" style="max-width:520px;margin:6vh auto 0"><h1>You're signed up</h1><p>${esc(done)}</p>${nav}</div>`);
-  return layout('Sign up for cleaning texts', `<div class="card" style="max-width:520px;margin:6vh auto 0">
-<h1>Cleaning schedule texts for ${esc(config.propertyName)}</h1>
-<p class="muted">${operator(config)}. Sign up here to get text messages about cleanings at this home.</p>
+// The public sign-up form. Joining the cleaning list and agreeing to texts are separate:
+// the text checkbox is optional, never pre-ticked, and the form works without it.
+export function joinPage(config, { error = '', done = '', name = '', phone = '', sms = false } = {}) {
+  if (done) return layout('Signed up', `<div class="card" style="max-width:520px;margin:6vh auto 0"><h1>You're on the list</h1><p>${esc(done)}</p>${nav}</div>`);
+  return layout('Join the cleaning schedule', `<div class="card" style="max-width:520px;margin:6vh auto 0">
+<h1>Join the cleaning schedule for ${esc(config.propertyName)}</h1>
+<p class="muted">${operator(config)}. Add your name and number so the owners have you on the cleaning schedule for this home.</p>
 ${error ? `<p class="flash">${esc(error)}</p>` : ''}
 <form method="post" action="/join">
 <p><label>Your name<br><input name="name" required maxlength="60" autocomplete="name" value="${esc(name)}" style="width:100%"></label></p>
 <p><label>Mobile number<br><input name="phone" type="tel" required autocomplete="tel" inputmode="tel" placeholder="(555) 555-5555" value="${esc(phone)}" style="width:100%"></label></p>
-<p><label style="display:flex;gap:10px;align-items:flex-start"><input type="checkbox" name="consent" value="yes" required style="margin-top:4px;flex:none"><span>${esc(consentText(config))} See the <a href="/terms">SMS terms</a> and <a href="/privacy">privacy policy</a>.</span></label></p>
-<button style="width:100%">Sign up for texts</button>
+<fieldset style="border:1px solid var(--line, #ccc);border-radius:8px;padding:10px 12px;margin:0 0 14px"><legend style="padding:0 6px"><b>Text messages (optional)</b></legend>
+<label style="display:flex;gap:10px;align-items:flex-start"><input type="checkbox" name="consent" value="yes"${sms ? ' checked' : ''} style="margin-top:4px;flex:none"><span>${esc(consentText(config))}</span></label>
+<p class="muted" style="margin:8px 0 0">Texts are optional. You can join the schedule without them, and the owners will reach you another way.</p></fieldset>
+<button style="width:100%">Join</button>
 </form>
-<p class="muted" style="margin-top:12px">You'll get a text confirming your sign-up. Reply STOP at any time to stop.</p>
+<p class="muted" style="margin-top:12px">If you tick the box you'll get one text confirming it. Reply STOP at any time to stop. <a href="/terms">SMS terms</a> · <a href="/privacy">Privacy policy</a></p>
 ${nav}</div>`);
 }
