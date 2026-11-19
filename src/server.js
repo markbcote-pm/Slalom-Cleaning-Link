@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url';
 import fs from 'node:fs';
 import { loadConfig } from './config.js';
 import { openDb } from './db.js';
-import { createNotifier } from './notify.js';
+import { createNotifier, twilioHint } from './notify.js';
 import { createService } from './service.js';
 import { syncAirbnb } from './sync.js';
 import { cleaningFeed } from './feed.js';
@@ -24,10 +24,18 @@ const ASSETS = {
 
 export function createApp(config, deps = {}) {
   const db = deps.db || openDb(config);
-  const notifier = deps.notifier || createNotifier(db, config, deps);
+  const push = deps.push || createPush({ db, config, fetchImpl: deps.fetchImpl });
+  // When a text doesn't go through, tell the owners' phones (at most once every 30 minutes).
+  let lastTextProblem = 0;
+  const textProblem = async ({ to, error }) => {
+    if (Date.now() - lastTextProblem < 30 * 60e3) return;
+    lastTextProblem = Date.now();
+    const who = config.groupMembers.find(x => x.phone && x.phone.replace(/\D/g, '').slice(-10) === String(to).replace(/\D/g, '').slice(-10))?.name || to;
+    try { await push.send({ title: 'A text did not go through', body: `Text to ${who}: ${error} See More > Messages sent.`, url: '/more#texting' }); } catch {}
+  };
+  const notifier = deps.notifier || createNotifier(db, config, { onProblem: textProblem, ...deps });
   const service = createService({ db, config, notifier });
   const notes = createNotes({ db, config });
-  const push = deps.push || createPush({ db, config, fetchImpl: deps.fetchImpl });
   const fin = createFinance({ db, config });
   const financeRoute = financeRoutes({ db, config, fin });
   const sync = async (opts = {}) => {
@@ -121,10 +129,27 @@ export function createApp(config, deps = {}) {
       db.prepare("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
         .run('consent:' + digits, JSON.stringify({ at: new Date().toISOString(), by: 'web form', method: 'web form', name, member: member?.name || null }));
       // Only people the owners have set up get the confirmation text; anyone else is just recorded,
-      // so the form can't be used to send texts to strangers.
-      if (member) await notifier.sms(member.phone, confirmationText(config));
+      // so the form can't be used to send texts to strangers. Either way the owners hear about it.
+      let sent = false, why = '';
+      if (member) {
+        const r = await notifier.sms(member.phone, confirmationText(config));
+        sent = !!r?.sid;
+        if (!sent) {
+          const last = db.prepare("SELECT status, error FROM outbox WHERE channel='sms' ORDER BY id DESC LIMIT 1").get();
+          why = last?.status === 'held' ? `${member.phone} isn't in SMS_ONLY_TO in Render, so the safety switch held it.`
+            : last?.status === 'dry_run' ? `texting is in test mode (${!config.twilio.sid ? 'TWILIO_ACCOUNT_SID is missing' : 'DRY_RUN is not 0'} in Render).`
+            : `Twilio refused it: ${twilioHint(last?.error)}`;
+        }
+      }
+      try {
+        await push.send({ title: `${name} signed up for texts`, url: '/more#texting',
+          body: !member ? `From ${phone}. That number isn't in APPROVERS or CLEANER in Render, so no confirmation text was sent.`
+            : sent ? `Confirmation text sent to ${member.name} at ${member.phone}.`
+            : `No confirmation text went out: ${why}` });
+      } catch {}
       return send(res, 200, joinPage(config, { done: member
-        ? `Thanks, ${name}. A confirmation text is on its way to ${phone}. Reply STOP at any time to stop.`
+        ? (sent ? `Thanks, ${name}. A confirmation text is on its way to ${phone}. Reply STOP at any time to stop.`
+          : `Thanks, ${name}. Your sign-up is recorded. The confirmation text couldn't be sent just now; the owners have been told and will sort it out.`)
         : `Thanks, ${name}. Your sign-up is recorded. You'll start getting texts once the owners add you to the cleaning schedule.` }));
     }
 
@@ -472,25 +497,6 @@ export function createApp(config, deps = {}) {
   function localInputToIso(v) {
     const mm = v.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
     return mm ? localToUtc(mm[1], mm[2], config.timezone).toISOString() : undefined;
-  }
-
-  // Plain-English hints for the Twilio errors people hit when first setting up.
-  function twilioHint(err = '') {
-    const code = (String(err).match(/(?:"code"\s*:\s*|code )(\d{5})/) || [])[1];
-    const hints = {
-      20003: 'the Account SID or Auth Token is wrong (20003).',
-      21211: 'the phone number is not valid (21211).',
-      21606: 'TWILIO_FROM is not a number on your Twilio account that can send texts (21606).',
-      21608: 'a trial Twilio account can only text numbers you have verified in Twilio (21608). Verify your number under Phone Numbers > Verified Caller IDs, or upgrade the account.',
-      21610: 'that number replied STOP. Text START to the Twilio number to opt back in (21610).',
-      30032: 'the toll-free number has not been verified yet (30032). Finish toll-free verification in the Twilio console.',
-      30034: 'US carriers block texts from numbers without A2P 10DLC registration (30034). Register the number under Messaging > Regulatory Compliance in Twilio.',
-      30007: 'the carrier filtered it as spam (30007).',
-      30003: 'the phone was unreachable (30003).',
-      30005: 'the number does not exist (30005).',
-      30006: 'the number cannot receive texts, e.g. a landline (30006).',
-    };
-    return hints[code] || String(err || 'unknown error').slice(0, 200);
   }
 
   function validName(n) {

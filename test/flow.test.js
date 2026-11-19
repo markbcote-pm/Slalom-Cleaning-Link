@@ -676,7 +676,7 @@ test('Live texting with SMS_ONLY_TO: only Mark gets real texts; test-text button
     assert.match(decodeURIComponent(r.headers.get('location')), /Delivered to \+12076512735\. Texting works\./);
     fail = 30034;
     r = await fetch(base + '/texting/test', { method: 'POST', headers: auth, redirect: 'manual' });
-    assert.match(decodeURIComponent(r.headers.get('location')), /A2P 10DLC registration \(30034\)/);
+    assert.match(decodeURIComponent(r.headers.get('location')), /approved A2P 10DLC campaign \(30034\)/);
   } finally { app.stop(); }
 });
 
@@ -716,7 +716,8 @@ test('Public sign-up form: unticked consent box required; group members get the 
     // A group member signs up: recorded, and the confirmation text goes out.
     const ok = await join({ name: 'Rosa', phone: '(555) 000-0003', consent: 'yes' });
     assert.equal(ok.status, 200);
-    assert.match(await ok.text(), /confirmation text is on its way/);
+    // In test mode nothing really goes out, so the page doesn't promise a text.
+    assert.match(await ok.text(), /couldn(&#39;|')t be sent just now/);
     assert.equal(outbox().length, 1);
     assert.equal(outbox()[0].to_addr, '+15550000003');
     assert.match(outbox()[0].body, /you're signed up for cleaning schedule texts.*Reply HELP for help, STOP to opt out\./);
@@ -726,6 +727,47 @@ test('Public sign-up form: unticked consent box required; group members get the 
     assert.match(await other.text(), /once the owners add you/);
     assert.equal(outbox().length, 1);
     assert.ok(app.db.prepare("SELECT 1 FROM meta WHERE key = 'consent:2125550199'").get());
+  } finally { app.stop(); }
+});
+
+test('Sign-up when live: confirmation text goes out, owners get told, and a carrier block shows up on Messages sent', async () => {
+  const config = loadConfig({ DOTENV: '0', DB_FILE: ':memory:', DRY_RUN: '0', TWILIO_ACCOUNT_SID: 'AC1', TWILIO_AUTH_TOKEN: 't', TWILIO_FROM: '+15559990000',
+    APPROVERS: 'Mark:+12075550000:,Danielle:+18315550000:', CLEANER: 'Jenn:', SMS_ONLY_TO: '+12075550000', BASE_URL: 'http://test' });
+  const twilio = [];
+  const fetchImpl = async (url, opts = {}) => {
+    if (opts.method === 'POST') { twilio.push(Object.fromEntries(new URLSearchParams(String(opts.body)))); return new Response(JSON.stringify({ sid: 'SM' + twilio.length, status: 'queued' }), { status: 201 }); }
+    return new Response(JSON.stringify({ sid: 'SM1', status: 'undelivered', error_code: 30034 }), { status: 200 });
+  };
+  const pushes = [];
+  const push = { send: async (m) => { pushes.push(m); return []; } };
+  const app = createApp(config, { fetchImpl, push, deliveryChecks: [5] });
+  await new Promise(r => app.server.listen(0, r));
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const join = (data) => fetch(base + '/join', { method: 'POST', body: new URLSearchParams(data) });
+  const outbox = () => app.db.prepare('SELECT * FROM outbox ORDER BY id').all();
+  try {
+    const ok = await join({ name: 'Mark', phone: '207-555-0000', consent: 'yes' });
+    assert.match(await ok.text(), /confirmation text is on its way/);
+    assert.equal(twilio.length, 1);
+    assert.equal(twilio[0].To, '+12075550000');
+    assert.match(twilio[0].Body, /STOP to opt out/);
+    assert.match(pushes[0].title, /Mark signed up/);
+    assert.match(pushes[0].body, /Confirmation text sent/);
+    // Twilio accepted it, then the carrier blocked it: the list and the owners' phones say why.
+    await new Promise(r => setTimeout(r, 60));
+    assert.equal(outbox()[0].status, 'undelivered');
+    assert.match(outbox()[0].error, /30034.*Sender Pool/);
+    assert.match(pushes[1].title, /did not go through/);
+    assert.match(pushes[1].body, /Text to Mark: carriers blocked it/);
+
+    // Danielle isn't on the safety switch yet: page doesn't promise a text, owners hear why.
+    const held = await join({ name: 'Danielle', phone: '831-555-0000', consent: 'yes' });
+    assert.match(await held.text(), /couldn(&#39;|')t be sent just now/);
+    assert.equal(twilio.length, 1);
+    assert.match(pushes.at(-1).body, /isn't in SMS_ONLY_TO/);
+    // Someone not on the list: recorded, not texted, owners told.
+    await join({ name: 'Pat', phone: '212-555-0199', consent: 'yes' });
+    assert.match(pushes.at(-1).body, /isn't in APPROVERS or CLEANER/);
   } finally { app.stop(); }
 });
 
