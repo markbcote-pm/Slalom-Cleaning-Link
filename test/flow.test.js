@@ -694,11 +694,11 @@ test('Public SMS info, privacy and terms pages need no login and cover what carr
     assert.match(terms, /Message frequency varies/);
     assert.match(terms, /Reply <b>STOP<\/b>/);
     assert.equal((await fetch(base + '/sms-terms')).status, 200);
-    assert.match(await (await fetch(base + '/sms')).text(), /one way to opt in: the sign-up form at <a href="\/join">[\s\S]*not ticked in advance[\s\S]*I agree to receive automated text messages/);
+    assert.match(await (await fetch(base + '/sms')).text(), /one way to opt in: the form at <a href="\/join">[\s\S]*optional and separate[\s\S]*not ticked in advance and not required[\s\S]*I agree to receive automated text messages/);
   } finally { app.stop(); }
 });
 
-test('Public sign-up form: unticked consent box required; group members get the confirmation text, strangers are only recorded', async () => {
+test('Public sign-up form: text consent is optional and unticked; group members who tick it get the confirmation text, strangers are only recorded', async () => {
   const { app, outbox, clearOutbox } = setup();
   await new Promise(r => app.server.listen(0, r));
   const base = `http://127.0.0.1:${app.server.address().port}`;
@@ -706,13 +706,22 @@ test('Public sign-up form: unticked consent box required; group members get the 
   const join = (data) => fetch(base + '/join', { method: 'POST', body: new URLSearchParams(data) });
   try {
     const form = await (await fetch(base + '/join')).text();
-    assert.match(form, /<input type="checkbox" name="consent" value="yes" required/);
+    assert.match(form, /<input type="checkbox" name="consent" value="yes" style/);
+    assert.doesNotMatch(form, /name="consent"[^>]*required/);
+    assert.match(form, /Text messages \(optional\)[\s\S]*You can join the schedule without them/);
     assert.doesNotMatch(form, /name="consent"[^>]*checked/);
     assert.match(form, /Message and data rates may apply\. Reply STOP to opt out/);
     clearOutbox();
-    // Without the box: refused, nothing stored or sent.
-    assert.equal((await join({ name: 'Rosa', phone: '555-000-0003' })).status, 400);
+    // Without the box: joined, but never texted, now or later.
+    const no = await join({ name: 'Rosa', phone: '555-000-0003' });
+    assert.equal(no.status, 200);
+    assert.match(await no.text(), /You won(&#39;|')t get any texts/);
     assert.equal(outbox().length, 0);
+    assert.match(await (await fetch(base + '/more', { headers: auth })).text(), /Rosa<\/b>[\s\S]*said no to texts/);
+    await app.notifier.sms('+15550000003', 'hello');
+    assert.equal(outbox()[0].status, 'held');
+    assert.match(outbox()[0].error, /without agreeing to texts/);
+    clearOutbox();
     // A group member signs up: recorded, and the confirmation text goes out.
     const ok = await join({ name: 'Rosa', phone: '(555) 000-0003', consent: 'yes' });
     assert.equal(ok.status, 200);

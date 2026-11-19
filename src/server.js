@@ -120,18 +120,18 @@ export function createApp(config, deps = {}) {
       const b = await readBody(req);
       const name = (b.get('name') || '').trim().slice(0, 60), phone = (b.get('phone') || '').trim().slice(0, 30);
       const digits = phone.replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '');
-      const again = (error) => send(res, 400, joinPage(config, { error, name, phone }));
-      if (b.get('consent') !== 'yes') return again('Please tick the box to agree to receive the texts.');
+      const again = (error) => send(res, 400, joinPage(config, { error, name, phone, sms: b.get('consent') === 'yes' }));
+      const sms = b.get('consent') === 'yes';
       if (!name || digits.length !== 10) return again('Please enter your name and a 10-digit US mobile number.');
       const ip = clientIp(req);
       if (joinTries(ip) > 10) return send(res, 429, joinPage(config, { error: 'Too many sign-ups from here. Try again later.', name, phone }));
       const member = config.groupMembers.find(x => x.phone && x.phone.replace(/\D/g, '').slice(-10) === digits);
       db.prepare("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
-        .run('consent:' + digits, JSON.stringify({ at: new Date().toISOString(), by: 'web form', method: 'web form', name, member: member?.name || null }));
+        .run('consent:' + digits, JSON.stringify({ at: new Date().toISOString(), by: 'web form', method: 'web form', name, member: member?.name || null, sms }));
       // Only people the owners have set up get the confirmation text; anyone else is just recorded,
       // so the form can't be used to send texts to strangers. Either way the owners hear about it.
       let sent = false, why = '';
-      if (member) {
+      if (member && sms) {
         const r = await notifier.sms(member.phone, confirmationText(config));
         sent = !!r?.sid;
         if (!sent) {
@@ -143,11 +143,14 @@ export function createApp(config, deps = {}) {
       }
       try {
         await push.send({ title: `${name} signed up for texts`, url: '/more#texting',
-          body: !member ? `From ${phone}. That number isn't in APPROVERS or CLEANER in Render, so no confirmation text was sent.`
+          body: !sms ? `${phone}${member ? ` (${member.name})` : ''} joined without agreeing to texts, so the app won't text that number.`
+            : !member ? `From ${phone}. That number isn't in APPROVERS or CLEANER in Render, so no confirmation text was sent.`
             : sent ? `Confirmation text sent to ${member.name} at ${member.phone}.`
             : `No confirmation text went out: ${why}` });
       } catch {}
-      return send(res, 200, joinPage(config, { done: member
+      return send(res, 200, joinPage(config, { done: !sms
+        ? `Thanks, ${name}. You're on the cleaning schedule list. You won't get any texts. If you change your mind, fill in this form again and tick the box.`
+        : member
         ? (sent ? `Thanks, ${name}. A confirmation text is on its way to ${phone}. Reply STOP at any time to stop.`
           : `Thanks, ${name}. Your sign-up is recorded. The confirmation text couldn't be sent just now; the owners have been told and will sort it out.`)
         : `Thanks, ${name}. Your sign-up is recorded. You'll start getting texts once the owners add you to the cleaning schedule.` }));

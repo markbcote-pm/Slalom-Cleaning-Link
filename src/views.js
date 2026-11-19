@@ -733,7 +733,7 @@ ${missing.length ? `<tr><th>Missing in Render</th><td class="warn">${missing.joi
 <p class="muted">Before anyone gets texts, send them the sign-up link <a href="/join"><code>${h(config.baseUrl)}/join</code></a>. When they submit it with the box ticked, it's recorded here and they get the confirmation text.</p>
 <table>${config.groupMembers.filter(p => p.phone).map(p => {
     const c = consents[p.phone.replace(/\D/g, '').slice(-10)];
-    return `<tr><td><b>${h(p.name)}</b><div class="muted">${h(p.phone)}</div></td><td>${c ? `${c.method === 'web form' ? 'Signed up on the form' : `Agreed, recorded by ${h(c.by)}`} ${h(new Date(c.at).toLocaleDateString('en-US', { timeZone: config.timezone, month: 'short', day: 'numeric', year: 'numeric' }))}` : '<span class="muted">Not signed up yet</span>'}</td></tr>`;
+    return `<tr><td><b>${h(p.name)}</b><div class="muted">${h(p.phone)}</div></td><td>${c ? `${c.method === 'web form' ? (c.sms === false ? 'Joined on the form, <b>said no to texts</b>' : 'Signed up on the form') : `Agreed, recorded by ${h(c.by)}`} ${h(new Date(c.at).toLocaleDateString('en-US', { timeZone: config.timezone, month: 'short', day: 'numeric', year: 'numeric' }))}` : '<span class="muted">Not signed up yet</span>'}</td></tr>`;
   }).join('')}</table>
 <form method="post" action="/texting/test" class="row" style="margin-top:10px"><button ${config.dryRun || !me?.phone ? 'disabled' : ''}>Send me a test text</button><span class="muted">${me?.phone ? `Goes only to ${h(me.name)} at ${h(me.phone)}, then checks it was delivered.` : 'No phone number on file for you.'}</span></form></div>`;
 }

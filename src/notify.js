@@ -38,10 +38,15 @@ export function createNotifier(db, config, { fetchImpl = globalThis.fetch, onPro
     return res.json();
   }
 
+  // Someone who joined on the form without ticking the text box is never texted.
+  const declined = (to) => {
+    try { const r = db.prepare('SELECT value FROM meta WHERE key = ?').get('consent:' + String(to).replace(/\D/g, '').slice(-10)); return r && JSON.parse(r.value).sms === false; } catch { return false; }
+  };
   const allowed = (to) => !config.smsOnlyTo?.length || config.smsOnlyTo.includes(String(to).replace(/\D/g, '').slice(-10));
 
   async function sms(to, body) {
     if (!to) return;
+    if (declined(to)) return log('sms', to, null, body, 'held', 'Not sent: this person joined without agreeing to texts');
     if (config.dryRun) return log('sms', to, null, body, 'dry_run');
     if (!allowed(to)) return log('sms', to, null, body, 'held', 'Not sent: only SMS_ONLY_TO numbers get texts while testing');
     try {
