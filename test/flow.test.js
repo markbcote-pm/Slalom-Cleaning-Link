@@ -1139,3 +1139,72 @@ test('GROUP_MODE=phone: approving opens Messages with the group; forwarded notif
     assert.match(more, /\/phone\/inbound\?key=/);
   } finally { app.server.close(); app.stop?.(); }
 });
+
+test('Group payment texts: "done, $140" bills the cleaning, "paid" pays it, unclear ones are asked about', async () => {
+  const { classifyPaymentText, amountIn } = await import('../src/textpay.js');
+  assert.equal(amountIn('All done! $140'), 14000);
+  assert.equal(amountIn('Finished, total is 165'), 16500);
+  assert.equal(amountIn('done at 2:30'), null);
+  assert.equal(classifyPaymentText('Will be done by 3', { fromCleaner: true }), null);
+  assert.deepEqual(classifyPaymentText('All done! $140', { fromCleaner: true }), { kind: 'done', done: true, amount: 14000 });
+  assert.equal(classifyPaymentText("I'll pay you tonight", { fromOwner: true }), null);
+  assert.equal(classifyPaymentText('Did you get paid?', { fromOwner: true }), null);
+  assert.deepEqual(classifyPaymentText('Paid! Sent on Venmo', { fromOwner: true }), { kind: 'paid', amount: null, method: 'Venmo' });
+
+  const config = loadConfig({ DOTENV: '0', DB_FILE: ':memory:', DRY_RUN: '1', ADMIN_PASSWORD: 'pw', FEED_TOKEN: 'feedtok',
+    APPROVERS: 'Mark:+15550000001,Danielle:+15550000002', CLEANER: 'Jenn:+15550000003', GROUP_MODE: 'phone', BASE_URL: 'http://test', TIMEZONE: 'America/Los_Angeles' });
+  const app = createApp(config);
+  // Two cleanings already done (in the past), no amounts yet.
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  const minus = (n) => { const d = new Date(today + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - n); return d.toISOString().slice(0, 10); };
+  const mk = (date) => Number(app.db.prepare(`INSERT INTO cleanings (source, date, status, created_at, updated_at) VALUES ('manual', ?, 'approved', ?, ?)`).run(date, 'x', 'x').lastInsertRowid);
+  const a = mk(minus(5)), b = mk(today);
+  const say = (author, body) => app.textPay.handle(app.notes.add({ body, author, source: 'group' }));
+  // Jenn texts today: the cleaning dated today is the one.
+  let r = say('Jenn', 'All done! $140 for today');
+  assert.equal(r.applied.id, b);
+  assert.equal(app.service.get(b).status, 'completed');
+  assert.equal(app.service.get(b).amount_cents, 14000);
+  // Danielle: "paid $140" matches the one owed amount.
+  r = say('Danielle', 'Paid $140 on Zelle, thanks Jenn!');
+  assert.equal(r.applied[0].status, 'paid');
+  assert.equal(app.service.get(b).paid_method, 'Zelle');
+  assert.equal(app.service.get(b).paid_by, 'Danielle');
+  // A "done" text with no cleaning on that day and two candidates: asked about.
+  mk(minus(3));
+  r = say('Jenn', 'Done, it was $150');
+  assert.ok(r.pending);
+  assert.equal(app.textPay.pending().length, 1);
+  await new Promise(res => app.server.listen(0, res));
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const auth = { Authorization: 'Basic ' + Buffer.from('x:pw').toString('base64') };
+  try {
+    const dash = await (await fetch(base + '/', { headers: auth })).text();
+    assert.match(dash, /Which cleaning is Jenn talking about\?/);
+    assert.match(dash, /Done, it was \$150/);
+    const post = await fetch(`${base}/text-matches/${r.pending.id}`, { method: 'POST', headers: auth, body: new URLSearchParams({ cleaning_id: String(a), amount: '150' }), redirect: 'manual' });
+    assert.equal(post.status, 303);
+    assert.equal(app.service.get(a).amount_cents, 15000);
+    assert.equal(app.textPay.pending().length, 0);
+
+    // Photos shared in from Messages: held, then saved to the picked cleaning, then a guest link.
+    const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(200, 1)]);
+    const fd = new FormData();
+    fd.append('photos', new Blob([jpeg], { type: 'image/jpeg' }), 'a.jpg');
+    fd.append('photos', new Blob([Buffer.from('not a photo')], { type: 'image/jpeg' }), 'b.jpg');
+    const shared = await fetch(base + '/share-photos', { method: 'POST', body: fd, redirect: 'manual' });
+    assert.equal(shared.status, 303);
+    const loc = shared.headers.get('location');
+    assert.match(await (await fetch(base + loc, { headers: auth })).text(), /Save 1 photo/);
+    assert.equal((await fetch(base + loc, { redirect: 'manual' })).status, 303);    // not signed in: sign in first
+    await fetch(base + loc, { method: 'POST', headers: auth, body: new URLSearchParams({ cleaning_id: String(b) }), redirect: 'manual' });
+    assert.equal(app.photos.list(b).length, 1);
+    const page = await (await fetch(`${base}/cleanings/${b}`, { headers: auth })).text();
+    const link = page.match(/"http:\/\/test(\/p\/[a-f0-9]{24})"/)[1];
+    const guest = await (await fetch(base + link)).text();
+    assert.match(guest, /ready for you|Freshly cleaned/);
+    const img = await fetch(`${base}${link}/${app.photos.list(b)[0].id}`);
+    assert.equal(img.headers.get('content-type'), 'image/jpeg');
+    assert.equal((await fetch(`${base}/p/${'0'.repeat(24)}`)).status, 404);
+  } finally { app.server.close(); app.stop?.(); }
+});

@@ -53,7 +53,7 @@ export function parseNotification(config, { title = '', text = '', from = '' }) 
 
 // Notifications get re-posted (another message arrives, the phone reconnects), so the same
 // text can be forwarded twice. Skip a repeat of the same words from the same person.
-export function createPhoneInbox({ db, config, notes, service }) {
+export function createPhoneInbox({ db, config, notes, service, onNote = () => {} }) {
   const recent = new Map();
   function receive(fields) {
     const n = parseNotification(config, fields);
@@ -66,7 +66,9 @@ export function createPhoneInbox({ db, config, notes, service }) {
     recent.set(key, now);
     const note = notes.add({ body: n.body, author: n.author, phone: n.phone, source: 'group' });
     const r = note ? service.cleanerReply({ body: n.body, phone: n.phone, author: n.author }) : { confirmed: [] };
-    return { saved: !!note, author: n.author, known: n.known, confirmed: r.confirmed.map(c => c.date) };
+    const pay = note ? onNote(note) : null;
+    return { saved: !!note, author: n.author, known: n.known, confirmed: r.confirmed.map(c => c.date),
+      ...(pay ? { payment: pay.kind, matched: pay.applied ? [].concat(pay.applied).map(c => c.date) : null, unclear: !!pay.pending } : {}) };
   }
   // The last few raw notifications, shown on the More tab so setup problems are easy to see.
   function remember(fields, n) {

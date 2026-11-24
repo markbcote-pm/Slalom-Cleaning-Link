@@ -9,10 +9,12 @@ import { createService } from './service.js';
 import { syncAirbnb } from './sync.js';
 import { cleaningFeed } from './feed.js';
 import { isDate, todayIn, prettyDate, localToUtc } from './dates.js';
-import { layout, messagePage, approvalPage, groupDecisionPage, dashboard, notesPage, todosPage, cleaningPage, inboxPage, staysPage, paymentsCsv, morePage, loginPage, phoneSendPage } from './views.js';
+import { layout, messagePage, approvalPage, groupDecisionPage, dashboard, notesPage, todosPage, cleaningPage, inboxPage, staysPage, paymentsCsv, morePage, loginPage, phoneSendPage, shareInPage, guestPhotosPage } from './views.js';
 import { createNotes, validTwilioSignature } from './notes.js';
 import { createPush, SERVICE_WORKER } from './push.js';
-import { createFinance, financeRoutes } from './finance.js';
+import { createFinance, financeRoutes, readForm, sniff } from './finance.js';
+import { createTextPay } from './textpay.js';
+import { createPhotos } from './photos.js';
 import { groupSmsLink, createPhoneInbox, inboundFields } from './phone.js';
 import { smsInfoPage, privacyPage, termsPage, confirmationText, joinPage } from './policy.js';
 
@@ -37,7 +39,13 @@ export function createApp(config, deps = {}) {
   const notifier = deps.notifier || createNotifier(db, config, { onProblem: textProblem, ...deps });
   const service = createService({ db, config, notifier });
   const notes = createNotes({ db, config });
-  const phoneInbox = createPhoneInbox({ db, config, notes, service });
+  const cleanerName = config.cleaner?.name || 'The cleaner';
+  const quietly = (p) => { Promise.resolve(p).catch(e => console.error('Notification failed:', e.message)); };
+  const textPay = createTextPay({ db, config, service,
+    onUnclear: (m) => quietly(push.send({ title: 'Which cleaning was this for?', body: `${m.author}: ${m.body}`.slice(0, 180), url: '/' })),
+    onCleaned: (c) => quietly(push.send({ title: `${cleanerName} finished the ${prettyDate(c.date)} cleaning`, body: 'To keep her photos for the next guest: in Messages, select them, tap Share, pick Cleaning.', url: `/cleanings/${c.id}` })) });
+  const photos = createPhotos({ db, config });
+  const phoneInbox = createPhoneInbox({ db, config, notes, service, onNote: (n) => textPay.handle(n) });
   const fin = createFinance({ db, config });
   const financeRoute = financeRoutes({ db, config, fin });
   const sync = async (opts = {}) => {
@@ -170,6 +178,8 @@ export function createApp(config, deps = {}) {
         background_color: '#f7f6f3', theme_color: '#2f6f5e',
         icons: [{ src: '/icon-192.png', sizes: '192x192', type: 'image/png' }, { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
           { src: '/icon-maskable.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }, { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml' }],
+        // Lets "Share" in Messages or Photos send pictures straight to the app (Android, installed app).
+        share_target: { action: '/share-photos', method: 'POST', enctype: 'multipart/form-data', params: { title: 'title', text: 'text', files: [{ name: 'photos', accept: ['image/*'] }] } },
       }), 'application/manifest+json');
     }
 
@@ -267,6 +277,28 @@ export function createApp(config, deps = {}) {
       return send(res, 200, messagePage('Done', r.message.status === 'sent' ? 'Sent to the group text.' : 'OK, nothing was sent to the group.', undo + back));
     }
 
+    // Photos shared in from another app. They wait in a holding area until someone signed in
+    // picks the cleaning (the share can arrive without the sign-in cookie).
+    if (p === '/share-photos' && req.method === 'POST') {
+      let form;
+      try { form = await readForm(req); } catch (e) { return send(res, 413, messagePage('Too big', 'That was more than the app can take at once. Try fewer photos.')); }
+      const t = photos.hold(form.files);
+      if (!t) return send(res, 400, messagePage('No photos', 'Nothing in that share was a photo the app can keep (JPEG, PNG, WebP or HEIC).'));
+      return redirect(res, `/share-photos/${t}`);
+    }
+    // The guest's link: just this cleaning's photos.
+    m = p.match(/^\/p\/([a-f0-9]+)(?:\/(\d+))?$/);
+    if (m && req.method === 'GET') {
+      const c = photos.byToken(m[1]);
+      if (!c) return send(res, 404, messagePage('Not found', 'This link is not valid.'));
+      if (m[2]) {
+        const ph = photos.get(Number(m[2]));
+        if (!ph || ph.cleaning_id !== c.id) return send(res, 404, 'Not found', 'text/plain');
+        return send(res, 200, photos.read(ph), ph.mime, { 'Cache-Control': 'private, max-age=86400' });
+      }
+      return send(res, 200, guestPhotosPage({ config, cleaning: c, photos: photos.list(c.id), base: `/p/${m[1]}` }));
+    }
+
     // GROUP_MODE=phone: the phone forwards each group-text notification here (MacroDroid/Tasker).
     if (p === '/phone/inbound' && (req.method === 'POST' || req.method === 'GET')) {
       if (!config.phone.key || !safeEq(url.searchParams.get('key') || '', config.phone.key)) return send(res, 403, JSON.stringify({ error: 'bad key' }), 'application/json');
@@ -288,7 +320,7 @@ export function createApp(config, deps = {}) {
       if (p === '/twilio/sms') {
         const from = body.get('From');
         const n = notes.add({ body: body.get('Body'), phone: from, source: 'sms' });
-        if (n) service.cleanerReply({ body: n.body, phone: from });
+        if (n) { service.cleanerReply({ body: n.body, phone: from }); textPay.handle(n); }
         // In "individual" mode there is no real group thread, so pass the text on to the others.
         if (n && config.groupMode !== 'conversation') {
           for (const person of config.groupMembers) {
@@ -300,8 +332,9 @@ export function createApp(config, deps = {}) {
       // Conversations webhook (onMessageAdded). Skip the app's own messages.
       if (body.get('EventType') === 'onMessageAdded' && body.get('Author') !== 'cleaning-link') {
         const author = body.get('Author') || '';
-        notes.add({ body: body.get('Body'), phone: author.startsWith('+') ? author : null, author: author.startsWith('+') ? null : author,
+        const gn = notes.add({ body: body.get('Body'), phone: author.startsWith('+') ? author : null, author: author.startsWith('+') ? null : author,
           at: body.get('DateCreated') ? new Date(body.get('DateCreated')).toISOString() : undefined, source: 'group' });
+        textPay.handle(gn);
         service.cleanerReply({ body: body.get('Body'), phone: author.startsWith('+') ? author : null, author: author.startsWith('+') ? null : author });
       }
       return send(res, 200, '', 'text/plain');
@@ -335,9 +368,53 @@ export function createApp(config, deps = {}) {
     // Income, expenses, receipts and the CPA package (reads its own form bodies, including photo uploads).
     if (await financeRoute({ req, res, p, url, who, send, redirect })) return;
 
+    // ---- Photos and unclear payment texts ----
+    m = p.match(/^\/share-photos\/([a-f0-9]{24})(?:\/(\d+))?$/);
+    if (m) {
+      if (req.method === 'GET' && m[2] != null) {
+        const f = photos.held(m[1])?.find(x => x.n === m[2]);
+        return f ? send(res, 200, f.data, sniff(f.data)?.[0] || 'application/octet-stream', { 'Cache-Control': 'no-store' }) : send(res, 404, 'Not found', 'text/plain');
+      }
+      if (req.method === 'GET') {
+        const files = photos.held(m[1]);
+        if (!files) return send(res, 404, messagePage('Already saved', 'These photos were already saved or the share expired. Share them again from Messages.', '<p><a class="btn" href="/">Back to the calendar</a></p>'));
+        return send(res, 200, shareInPage({ config, db, who, token: m[1], count: files.length, likely: photos.likelyCleaning(), cleanings: photos.recentCleanings() }));
+      }
+      const body = await readBody(req);
+      if (body.get('discard') === '1') { photos.discard(m[1]); return redirect(res, '/?flash=' + encodeURIComponent('Photos not saved.')); }
+      const cid = Number(body.get('cleaning_id'));
+      if (!service.get(cid)) return redirect(res, `/share-photos/${m[1]}`);
+      const ids = photos.claim(m[1], cid, who || 'Owner');
+      return redirect(res, ids ? `/cleanings/${cid}#photos` : '/');
+    }
+    m = p.match(/^\/photos\/(\d+)(\/delete)?$/);
+    if (m) {
+      const ph = photos.get(Number(m[1]));
+      if (!ph) return send(res, 404, 'Not found', 'text/plain');
+      if (req.method === 'GET' && !m[2]) return send(res, 200, photos.read(ph), ph.mime, { 'Cache-Control': 'private, max-age=86400' });
+      if (req.method === 'POST' && m[2]) { photos.remove(ph.id); return redirect(res, `/cleanings/${ph.cleaning_id}#photos`); }
+    }
+    m = p.match(/^\/cleanings\/(\d+)\/photos$/);
+    if (m && req.method === 'POST') {
+      const id = Number(m[1]);
+      if (!service.get(id)) return send(res, 404, 'Not found', 'text/plain');
+      let form;
+      try { form = await readForm(req); } catch { return send(res, 413, 'Too many photos at once. Try fewer.', 'text/plain'); }
+      photos.add(id, form.files, who || 'Owner');
+      return redirect(res, `/cleanings/${id}#photos`);
+    }
+    m = p.match(/^\/text-matches\/(\d+)$/);
+    if (m && req.method === 'POST') {
+      const body = await readBody(req);
+      const r = textPay.resolve(Number(m[1]), { cleaningIds: body.get('skip') === '1' ? [] : body.getAll('cleaning_id').map(Number).filter(id => service.get(id)),
+        amount: body.get('amount'), method: body.get('method'), by: who || 'Owner' });
+      const msg = r.error || (r.dismissed ? 'OK, that text is not about a cleaning.' : 'Saved to the tracker.');
+      return redirect(res, '/?flash=' + encodeURIComponent(msg));
+    }
+
     if (req.method === 'GET' && p === '/') {
       const month = /^\d{4}-\d{2}$/.test(url.searchParams.get('month') || '') ? url.searchParams.get('month') : todayIn(config.timezone).slice(0, 7);
-      return send(res, 200, dashboard({ config, service, db, month, who, flash: url.searchParams.get('flash'), review: Number(url.searchParams.get('review')) || null, msg: url.searchParams.get('msg'), msgnote: url.searchParams.get('msgnote') }));
+      return send(res, 200, dashboard({ config, service, db, month, who, flash: url.searchParams.get('flash'), review: Number(url.searchParams.get('review')) || null, msg: url.searchParams.get('msg'), msgnote: url.searchParams.get('msgnote'), textPay }));
     }
     if (req.method === 'GET' && p === '/notes') return send(res, 200, notesPage({ config, db, who }));
     if (req.method === 'GET' && p === '/inbox') return send(res, 200, inboxPage({ config, service, db, who }));
@@ -350,7 +427,7 @@ export function createApp(config, deps = {}) {
     if (req.method === 'GET' && p === '/todos') return send(res, 200, todosPage({ config, db, who }));
     m = p.match(/^\/cleanings\/(\d+)$/);
     if (req.method === 'GET' && m) {
-      const page = cleaningPage({ config, db, who, service, id: Number(m[1]), receipts: fin.receiptsForCleaning(Number(m[1])) });
+      const page = cleaningPage({ config, db, who, service, id: Number(m[1]), receipts: fin.receiptsForCleaning(Number(m[1])), photos: photos.list(Number(m[1])), photosLink: `${config.baseUrl}/p/${photos.shareToken(Number(m[1]))}` });
       return page ? send(res, 200, page) : send(res, 404, 'Not found', 'text/plain');
     }
     if (req.method !== 'POST') return send(res, 404, 'Not found', 'text/plain');
@@ -555,7 +632,7 @@ export function createApp(config, deps = {}) {
   }
   const stop = () => { clearInterval(timer); server.close(); };
 
-  return { server, db, service, notes, phoneInbox, sync, notifier, push, fin, startBackground, stop };
+  return { server, db, service, notes, phoneInbox, textPay, photos, sync, notifier, push, fin, startBackground, stop };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

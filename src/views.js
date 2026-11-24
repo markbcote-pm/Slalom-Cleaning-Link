@@ -55,7 +55,10 @@ export const UPLOAD_JS = `<script>
 const CSS = `
 :root{--bg:#f7f6f3;--card:#fff;--ink:#1d1d1b;--muted:#6b6a66;--line:#e4e2dc;--accent:#2f6f5e;--accent-ink:#fff;--warn:#a5551b;--chip:#e3f0ec;--chip-ink:#1f4f42;--pending:#fbefd9;--pending-ink:#7a4a10;--stay:#3d5a80;--stay-ink:#fff;--win:#eef6f2;--win-ink:#2f6f5e;--win-line:#8fbfae;--tight:#b3412e;--tight-ring:#ffb199;--s-pending:#a16207;--s-missing:#d9480f;--s-past:#8a939e;--w-missing:#fff0e6;--w-missing-ink:#a8360a;--out:#efeee9;--c-prop:#fdf3e1;--c-prop-ink:#7a4a10;--c-prop-line:#c8912f;--c-asked:#ece7fc;--c-asked-ink:#4a3593;--c-asked-line:#8d78d9;--c-ok:#2f6f5e;--c-ok-ink:#fff;--c-past:#efeee9;--c-past-ink:#8a8780;--c-past-line:#d9d7d0}
 @media (prefers-color-scheme:dark){:root{--bg:#141413;--card:#1e1e1c;--ink:#ecebe6;--muted:#a3a19a;--line:#33322f;--accent:#5fb39a;--accent-ink:#0f1f1a;--warn:#e19a62;--chip:#1f3a32;--chip-ink:#bfe6d9;--pending:#3a2c16;--pending-ink:#f2cf96;--stay:#5b7db0;--stay-ink:#fff;--win:#17302a;--win-ink:#9fd6c3;--win-line:#3f7a69;--tight:#d0604b;--tight-ring:#ffb199;--s-pending:#b7791f;--s-missing:#e8590c;--s-past:#4b5563;--w-missing:#3b1d0e;--w-missing-ink:#ffb48a;--out:#181817;--c-prop:#3a2c16;--c-prop-ink:#f2cf96;--c-prop-line:#b7791f;--c-asked:#2b2448;--c-asked-ink:#d4c9ff;--c-asked-line:#7563cc;--c-ok:#3f8f78;--c-ok-ink:#fff;--c-past:#262624;--c-past-ink:#8f8d86;--c-past-line:#3a3a37}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,Segoe UI,sans-serif}
+*{box-sizing:border-box}
+.pick{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--line)}.pick input{margin-top:4px}
+.gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}.gallery img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:8px;display:block}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,Segoe UI,sans-serif}
 main{max-width:980px;margin:0 auto;padding:16px}h1{font-size:22px;margin:8px 0 4px}h2{font-size:17px;margin:0 0 10px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin:14px 0}
 .muted{color:var(--muted)}.warn{color:var(--tight)}.missing-text{color:var(--s-missing);font-weight:600}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
@@ -501,7 +504,7 @@ function paymentRow(c, config) {
     : `Price quoted: <b>${money(c.amount_cents)}</b>, not paid yet.`}</p>`;
 }
 
-export function cleaningPage({ config, db, who, service, id, receipts = [] }) {
+export function cleaningPage({ config, db, who, service, id, receipts = [], photos = [], photosLink = '' }) {
   const c = service.get(id);
   if (!c) return null;
   const stay = db.prepare("SELECT * FROM bookings WHERE status='active' AND check_out <= ? ORDER BY check_out DESC LIMIT 1").get(c.date);
@@ -519,9 +522,10 @@ ${stepPills(c, service, config, who)}
 ${stateBanner(c, config)}
 ${paymentRow(c, config)}
 ${['completed', 'paid'].includes(c.status) ? `<div class="h3">Payment receipts</div>${receiptStrip(receipts, { deletable: true, back: `/cleanings/${c.id}` })}
-<form method="post" action="/cleanings/${c.id}/receipt" enctype="multipart/form-data" data-upload data-autosubmit>${receiptInputs(receipts.length ? 'Add another (Venmo screenshot, invoice)' : 'Add a Venmo screenshot or invoice')}</form>${UPLOAD_JS}` : ''}
+<form method="post" action="/cleanings/${c.id}/receipt" enctype="multipart/form-data" data-upload data-autosubmit>${receiptInputs(receipts.length ? 'Add another (Venmo screenshot, invoice)' : 'Add a Venmo screenshot or invoice')}</form>` : ''}
 <table style="margin-top:10px"><tr><th>After the stay of</th><td>${stayText(stay)}</td></tr><tr><th>Before the stay of</th><td>${stayText(nextStay)}</td></tr>
 ${c.note ? `<tr><th>Note</th><td>${h(c.note)}</td></tr>` : ''}</table></div>
+${photosCard(c, photos, photosLink, nextStay)}
 <div class="card"><h2>Notes</h2>${notes.length ? `<ul class="notes">${notes.map(n => noteItem(n, { config, cleanings, showCleaning: false })).join('')}</ul>` : '<p class="muted">No notes for this cleaning yet.</p>'}
 <h2 style="margin-top:14px">Add a note</h2>${addNoteForm(config, cleanings, c.id)}</div>
 ${todos.length ? `<div class="card"><h2>To-dos from this cleaning</h2><ul>${todos.map(t => `<li>${t.status === 'done' ? '✓ ' : ''}${h(t.title)}</li>`).join('')}</ul></div>` : ''}
@@ -529,6 +533,24 @@ ${groupMsgs.length ? `<div class="card"><h2>Group texts</h2><table>${groupMsgs.m
 <td>${g.status === 'skipped' && g.id === latestId ? `<form method="post" action="/g/${g.token}"><input type="hidden" name="by" value="${h(who)}"><button class="ghost" name="send" value="undo">Undo</button></form>` : g.status === 'pending' ? `<a class="btn ghost" href="/?month=${c.date.slice(0, 7)}&msg=${g.token}">Decide</a>` : ''}</td></tr>`).join('')}</table></div>` : ''}
 ${c.status === 'declined' ? `<div class="card"><p>This cleaning was marked not needed.</p><form method="post" action="/cleanings/${c.id}/restore"><button class="ghost">Undo, put it back for approval</button></form></div>` : ''}
 <div class="card"><h2>History</h2><table>${events.map(e => `<tr><td class="muted" style="white-space:nowrap">${h(when(e.at, config.timezone))}</td><td><b>${h(e.stage)}</b> ${h(e.detail || '')}</td></tr>`).join('')}</table></div>`);
+}
+
+// After-cleaning photos and the ways to pass them to the next guest.
+function photosCard(c, photos, link, nextStay) {
+  return `<div class="card" id="photos"><h2>Photos${photos.length ? ` (${photos.length})` : ''}</h2>
+${photos.length ? `<div class="receipts">${photos.map(p => `<div class="receipt"><a href="/photos/${p.id}" target="_blank" rel="noopener"><img class="thumb" src="/photos/${p.id}" alt="" loading="lazy"></a><form method="post" action="/photos/${p.id}/delete" onsubmit="return confirm('Delete this photo?')"><button class="x" aria-label="Delete photo">&times;</button></form></div>`).join('')}</div>
+<div class="row" style="margin-top:10px"><button type="button" id="share-photos">Share photos${nextStay ? ` with ${h(guestLabel(nextStay))}` : ''}</button><button type="button" class="ghost" id="copy-link">Copy guest link</button></div>
+<p class="muted" id="share-note">"Share photos" opens your phone's share menu with the pictures, so you can pick Airbnb and attach them to a message. "Copy guest link" copies a private page with just these photos.</p>
+<script>{const ids=${JSON.stringify(photos.map(p => p.id))};const link=${JSON.stringify(link).replace(/</g, '\\u003c')};const note=document.getElementById('share-note');
+document.getElementById('copy-link').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(link);note.textContent='Copied: '+link;}catch(e){note.textContent=link;}});
+document.getElementById('share-photos').addEventListener('click',async()=>{try{note.textContent='Getting the photos ready...';
+const files=await Promise.all(ids.map(async(id,i)=>{const b=await (await fetch('/photos/'+id)).blob();return new File([b],'photo-'+(i+1)+'.'+(b.type.split('/')[1]||'jpg'),{type:b.type});}));
+if(navigator.canShare&&navigator.canShare({files})){await navigator.share({files});note.textContent='Shared.';}
+else{await navigator.clipboard.writeText(link);note.textContent="This browser can't share photos directly, so the guest link was copied instead: "+link;}}catch(e){if(e.name!=='AbortError')note.textContent='Could not share: '+e.message;else note.textContent='';}});}</script>`
+    : '<p class="muted">No photos yet. Quickest way: in Messages, select the photos the cleaner sent, tap Share, then pick <b>Cleaning</b>. Or add them here.</p>'}
+<form method="post" action="/cleanings/${c.id}/photos" enctype="multipart/form-data" data-upload data-autosubmit><div class="upload"><div class="row">
+<label class="btn ghost">Add photos<input type="file" name="photo" accept="image/*" multiple hidden></label></div><div class="muted upl-list" style="font-size:13px"></div></div></form>
+${UPLOAD_JS}</div>`;  // one copy, after both upload forms (receipts and photos)
 }
 
 function staysCard(bookings, today, config, cleanings = []) {
@@ -621,7 +643,7 @@ document.getElementById('msg-later').addEventListener('click',()=>d.close());d.a
 }
 
 // Home: just the calendar, with one line for anything that needs attention.
-export function dashboard({ config, service, db, month, who, flash, review, msg, msgnote }) {
+export function dashboard({ config, service, db, month, who, flash, review, msg, msgnote, textPay }) {
   const pendingMsg = msg ? db.prepare('SELECT * FROM group_messages WHERE token = ?').get(msg) : null;
   if (pendingMsg && pendingMsg.status !== 'pending' && !flash) flash = pendingMsg.status === 'sent' ? 'That text was already sent to the group.' : 'That text was already decided.';
   const { today, cleanings, bookings } = pageData({ config, service, db, month });
@@ -638,7 +660,52 @@ export function dashboard({ config, service, db, month, who, flash, review, msg,
 ${flash ? `<div class="flash">${h(flash)}</div>` : ''}
 ${alerts.length ? `<div class="alerts">${alerts.join('')}</div>` : ''}
 <div class="card">${calendar(month, cleanings, bookings, config.timezone, config, { ...calendarExtras(db), review: reviewFor(service, review) })}</div>
-${pendingMsg?.status === 'pending' ? groupDialog({ db, config, m: pendingMsg, who, note: msgnote }) : ''}`);
+${pendingMsg?.status === 'pending' ? groupDialog({ db, config, m: pendingMsg, who, note: msgnote })
+  : !review && textPay?.pending().length ? matchDialog({ config, db, textPay, who }) : ''}`);
+}
+
+// A payment text from the group that couldn't be tied to one cleaning: ask which, on opening the app.
+function matchDialog({ config, db, textPay, who }) {
+  const all = textPay.pending();
+  const m = all[0];
+  const cands = textPay.candidates(m);
+  const stayBefore = (date) => db.prepare("SELECT * FROM bookings WHERE status='active' AND check_out <= ? ORDER BY check_out DESC LIMIT 1").get(date);
+  const paid = m.kind === 'paid';
+  const sent = new Date(m.at).toLocaleString('en-US', { timeZone: config.timezone, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const rows = cands.map((c, i) => {
+    const st = stayBefore(c.date);
+    const state = c.status === 'paid' ? `paid ${money(c.amount_cents)}` : c.amount_cents != null ? `${money(c.amount_cents)} owed` : c.status === 'completed' ? 'cleaned, no amount yet' : 'scheduled';
+    return `<label class="pick"><input type="${paid ? 'checkbox' : 'radio'}" name="cleaning_id" value="${c.id}" ${i === 0 && !paid ? 'checked' : ''}>
+<span><b>${h(prettyDate(c.date))}</b> <span class="muted">· ${h(state)}</span><br><span class="muted">${st ? `after ${h(guestLabel(st))}'s stay` : 'no stay before it'}</span></span></label>`;
+  }).join('');
+  return `<dialog id="match-dialog"><form method="post" action="/text-matches/${m.id}">
+<h2>${paid ? 'Which cleaning was paid?' : `Which cleaning is ${h(m.author)} talking about?`}</h2>
+<p class="muted">From the group text${all.length > 1 ? ` (1 of ${all.length})` : ''}, ${h(sent)}:</p>
+<blockquote style="white-space:pre-wrap;border-left:3px solid var(--line);margin:0 0 10px;padding:6px 12px"><b>${h(m.author)}:</b> ${h(m.body)}</blockquote>
+${rows || '<p class="muted">No cleanings around that date. If it was about one, add it on the calendar first.</p>'}
+<div class="row" style="margin-top:10px"><label>Amount $ <input name="amount" type="number" min="1" step="0.01" value="${m.amount_cents != null ? (m.amount_cents / 100).toFixed(2) : ''}" style="width:110px" ${paid ? '' : 'placeholder="if she said"'}></label>
+${paid ? `<select name="method" aria-label="How it was paid">${['Venmo', 'Zelle', 'Cash', 'Check', 'Other'].map(x => `<option ${x === m.method ? 'selected' : ''}>${x}</option>`).join('')}</select>` : ''}</div>
+<div class="dialog-actions">${rows ? `<button>${paid ? 'Mark paid' : 'Save'}</button>` : ''}<button class="ghost" name="skip" value="1">Not about a cleaning</button><button class="ghost" type="button" id="match-later">Ask me later</button></div>
+<p class="muted" style="margin-bottom:0">${paid ? 'Tick every cleaning this payment covered.' : 'Saving marks it cleaned and, with an amount, records what she asked for.'}</p></form></dialog>
+<script>{const d=document.getElementById('match-dialog');document.getElementById('match-later').addEventListener('click',()=>d.close());d.showModal();}</script>`;
+}
+
+// After sharing photos into the app: which cleaning are they from?
+export function shareInPage({ config, db, who, token, count, likely, cleanings }) {
+  const stayBefore = (date) => db.prepare("SELECT * FROM bookings WHERE status='active' AND check_out <= ? ORDER BY check_out DESC LIMIT 1").get(date);
+  const thumbs = Array.from({ length: Math.min(count, 12) }, (_, i) => `<img class="thumb" src="/share-photos/${token}/${i}" alt="" loading="lazy">`).join('');
+  return layout('Save photos', `${header({ config, db, who, active: 'calendar' })}
+<div class="card"><h2>Save ${count} photo${count === 1 ? '' : 's'}</h2><div class="receipts">${thumbs}</div>${count > 12 ? `<p class="muted">and ${count - 12} more</p>` : ''}
+<form method="post" action="/share-photos/${token}"><p>Which cleaning are they from?</p>
+${cleanings.map(c => { const st = stayBefore(c.date); return `<label class="pick"><input type="radio" name="cleaning_id" value="${c.id}" ${c.id === likely?.id ? 'checked' : ''}><span><b>${h(prettyDate(c.date))}</b>${st ? ` <span class="muted">after ${h(guestLabel(st))}'s stay</span>` : ''}</span></label>`; }).join('') || '<p class="muted">No cleanings yet.</p>'}
+<div class="dialog-actions"><button ${cleanings.length ? '' : 'disabled'}>Save photos</button><button class="ghost" name="discard" value="1">Don't save</button></div></form></div>`);
+}
+
+// What the next guest sees from the link Mark sends them.
+export function guestPhotosPage({ config, cleaning, photos, base }) {
+  return layout(`${config.propertyName}, ready for you`, `<div class="card"><h1>${h(config.propertyName)}</h1>
+<p class="muted">Freshly cleaned ${h(prettyDate(cleaning.date))}.</p>
+${photos.length ? `<div class="gallery">${photos.map(p => `<a href="${base}/${p.id}" target="_blank" rel="noopener"><img src="${base}/${p.id}" alt="" loading="lazy"></a>`).join('')}</div>` : '<p>No photos yet.</p>'}</div>`);
 }
 
 export function inboxPage({ config, service, db, who }) {
@@ -752,6 +819,9 @@ ${config.cleaner && !config.cleaner.phone ? `<p class="warn">${h(config.cleaner.
 <li>Save. In Android settings, set MacroDroid's battery use to <b>Unrestricted</b> so it keeps running.</li>
 <li>Ask Danielle to text the group "test". It should show up below and on the Notes tab.</li></ol>
 <p class="muted">Messages you send yourself don't make a notification, so they aren't forwarded. A muted group doesn't either, so keep notifications on for it.</p></details>
+<h2 style="margin-top:14px">Payments and photos from the group</h2>
+<p>When ${h(config.cleaner?.name || 'the cleaner')} texts that she's done (with or without the amount, like "All done, $140"), that cleaning is marked cleaned and the amount is recorded. When Danielle texts "paid" (or "sent on Venmo"), what's owed is marked paid. If a text could fit more than one cleaning, the app asks which one the next time you open it.</p>
+<p class="muted">Your own "paid" texts aren't forwarded (your phone doesn't notify you about your own messages), so mark those paid in the app. Photos can't come through a notification: in Messages, select her photos, tap Share and pick <b>Cleaning</b>. If Cleaning isn't in the share menu yet, remove the app from your home screen and add it again from Chrome.</p>
 <h2 style="margin-top:14px">Last messages forwarded</h2>
 ${last.length ? `<table>${last.map(l => `<tr><td class="muted">${h(new Date(l.at).toLocaleString('en-US', { timeZone: config.timezone }))}</td><td>${h(l.title)}<div class="muted">${h(l.text)}</div></td><td>${l.known ? h(l.author) : `<span class="warn">Couldn't tell who sent it</span>`}</td></tr>`).join('')}</table>
 <p class="muted">If the sender isn't recognised, add the name your phone shows for them as PHONE_ALIASES in Render, e.g. <code>Jenn=Jennifer Patterson</code>.</p>` : '<p class="muted">Nothing yet.</p>'}
