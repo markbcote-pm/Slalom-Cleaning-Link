@@ -102,6 +102,9 @@ export function createNotifier(db, config, { fetchImpl = globalThis.fetch, onPro
 
   // Message the shared thread with Mark, Danielle and the cleaner.
   async function group(body) {
+    // Our own group text: nothing goes out from the server. The page that approved it opens
+    // Messages with this text filled in, and the person taps Send there.
+    if (config.groupMode === 'phone') return log('group', 'phone', null, body, 'on phone', 'Opened in Messages for you to tap Send');
     if (config.groupMode === 'conversation' && config.twilio.conversationSid) {
       if (config.dryRun) return log('group', 'conversation', null, body, 'dry_run');
       if (config.smsOnlyTo?.length) return log('group', 'conversation', null, body, 'held', 'Group thread is off while SMS_ONLY_TO is set');

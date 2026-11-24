@@ -1102,3 +1102,40 @@ test('Airbnb cancellation: phone alert, and tapping it offers to text Jenn only 
     assert.ok(html.includes(token));
   } finally { app.stop(); }
 });
+
+test('GROUP_MODE=phone: approving opens Messages with the group; forwarded notifications become notes and confirm', async () => {
+  const config = loadConfig({ DOTENV: '0', DB_FILE: ':memory:', DRY_RUN: '1', ADMIN_PASSWORD: 'pw', FEED_TOKEN: 'feedtok',
+    APPROVERS: 'Mark:+15550000001,Danielle:+15550000002', CLEANER: 'Jenn:+15550000003', GROUP_MODE: 'phone',
+    PHONE_ALIASES: 'Danielle=Dani', BASE_URL: 'http://test', TIMEZONE: 'America/Los_Angeles' });
+  const app = createApp(config);
+  await new Promise(r => app.server.listen(0, r));
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  try {
+    await app.sync({ icalText: airbnb([['s1', '2027-01-05', '2027-01-08']]), now: NOW });
+    const c = app.db.prepare('SELECT * FROM cleanings').get();
+    // Danielle approves from her text link: Messages should open to Mark + Jenn, not to herself.
+    const r = await fetch(`${base}/a/${c.approval_token}`, { method: 'POST', body: new URLSearchParams({ by: 'Danielle' }), redirect: 'manual' });
+    assert.equal(r.status, 303);
+    const page = await (await fetch(base + r.headers.get('location'))).text();
+    assert.match(page, /Last step: tap Send/);
+    assert.match(page, /href="sms:\+15550000001,\+15550000003\?body=New%20cleaning/);
+    assert.equal(app.db.prepare("SELECT status FROM outbox WHERE channel='group'").get().status, 'on phone');
+
+    // Wrong key is refused.
+    assert.equal((await fetch(`${base}/phone/inbound?key=nope`, { method: 'POST', body: 'text=yes' })).status, 403);
+    const key = config.phone.key;
+    // Two notification styles: sender in the title, or "Name: text" under the group name.
+    const a = await (await fetch(`${base}/phone/inbound?key=${key}`, { method: 'POST', body: new URLSearchParams({ title: 'Jenn Patterson', text: 'Yes I can do it' }) })).json();
+    assert.deepEqual([a.saved, a.author, a.confirmed], [true, 'Jenn', ['2027-01-08']]);
+    const b = await (await fetch(`${base}/phone/inbound?key=${key}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: 'Slalom cleaning', text: 'Dani: out of paper towels' }) })).json();
+    assert.deepEqual([b.saved, b.author], [true, 'Danielle']);
+    // The same notification forwarded twice is saved once.
+    const dup = await (await fetch(`${base}/phone/inbound?key=${key}`, { method: 'POST', body: new URLSearchParams({ title: 'Jenn Patterson', text: 'Yes I can do it' }) })).json();
+    assert.equal(dup.reason, 'duplicate');
+    assert.equal(app.db.prepare('SELECT COUNT(*) n FROM notes').get().n, 2);
+    assert.ok(app.db.prepare('SELECT cleaner_confirmed_at FROM cleanings').get().cleaner_confirmed_at);
+    const more = await (await fetch(base + '/more', { headers: { Authorization: 'Basic ' + Buffer.from('x:pw').toString('base64') } })).text();
+    assert.match(more, /Group text \(through your phone\)/);
+    assert.match(more, /\/phone\/inbound\?key=/);
+  } finally { app.server.close(); app.stop?.(); }
+});

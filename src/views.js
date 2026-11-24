@@ -1,4 +1,5 @@
 import { prettyDate, prettyTime, addDays, todayIn } from './dates.js';
+import { groupSmsLink } from './phone.js';
 
 export const h = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const money = (cents) => `$${((cents || 0) / 100).toFixed(2)}`;
@@ -125,6 +126,16 @@ export function layout(title, body) {
 
 export function messagePage(title, text, extra = '') {
   return layout(title, `<div class="card"><h1>${h(title)}</h1><p>${h(text)}</p>${extra}</div>`);
+}
+
+// GROUP_MODE=phone: the last step of sending. Messages opens with the group and the text filled in.
+export function phoneSendPage(gm, smsLink, { approved = false, by = '', inApp = false } = {}) {
+  return layout('Send in Messages', `<div class="card"><h1>${approved ? 'Approved. ' : ''}Last step: tap Send</h1>
+<p>Tap the button, check it's your group conversation, then tap <b>Send</b> in Messages. It goes out from your own number, into the group text.</p>
+<p><a class="btn" href="${h(smsLink)}" id="open-sms" style="font-size:1.1em">Open in Messages</a></p>
+<blockquote style="white-space:pre-wrap;border-left:3px solid #ccc;margin:0;padding:6px 12px">${h(gm.body)}</blockquote>
+<p class="muted">If Messages opens a new conversation instead of your group, the people in it don't match: check the phone numbers in Render (APPROVERS and CLEANER).${by ? ` Your own number is left out because you're ${h(by)}.` : ''}</p>
+${inApp ? '<p><a class="btn ghost" href="/">Back to the calendar</a></p>' : ''}</div>`);
 }
 
 export function loginPage({ next = '/', error = '', remember = true } = {}) {
@@ -401,7 +412,7 @@ export function notesPage({ config, db, who }) {
   const cleanings = pickable(db);
   return layout('Notes', `${header({ config, db, who, active: 'notes' })}
 <div class="card"><h2>Add a note</h2>${addNoteForm(config, cleanings)}</div>
-<div class="card"><h2>All notes</h2><p class="muted">${config.groupMode === 'conversation' ? 'Texts in the group thread are saved here automatically.' : 'Texts sent to the app\'s number are saved here automatically.'} Each one is tied to the cleaning it's about and the stay before it.</p>
+<div class="card"><h2>All notes</h2><p class="muted">${config.groupMode === 'phone' ? 'Texts in your group thread are saved here automatically when Mark\'s phone forwards them (messages you send yourself aren\'t, so add those by hand if they matter).' : config.groupMode === 'conversation' ? 'Texts in the group thread are saved here automatically.' : 'Texts sent to the app\'s number are saved here automatically.'} Each one is tied to the cleaning it's about and the stay before it.</p>
 ${notes.length ? `<ul class="notes">${notes.map(n => noteItem(n, { config, cleanings })).join('')}</ul>` : '<p class="muted">No notes yet.</p>'}</div>`);
 }
 
@@ -588,6 +599,7 @@ function groupDialog({ db, config, m, who, note }) {
   const staying = !['cancelled', 'declined'].includes(c.status)
     && db.prepare("SELECT 1 FROM bookings WHERE status='active' AND check_in < ? AND check_out > ?").get(c.date, c.date);
   const opts = config.approvers.map(a => `<option ${a.name === who ? 'selected' : ''}>${h(a.name)}</option>`).join('');
+  const phoneMode = config.groupMode === 'phone';
   return `<dialog id="msg-dialog"><form method="post" action="/g/${m.token}"><input type="hidden" name="ui" value="dialog">
 <h2>Text the group?</h2>
 <p class="muted">Cleaning on ${h(prettyDate(c.date))} is <b>${h(c.status.replace('_', ' '))}</b>. ${h(config.cleaner?.name || 'Your cleaner')} goes by the group text, so nothing is sent unless you say so.</p>
@@ -595,12 +607,16 @@ ${staying ? `<p class="warn">Heads up: guests are staying at the house on ${h(pr
 ${note ? `<div class="flash">${h(note)}</div>` : ''}
 <textarea name="body" style="min-height:110px" aria-label="Message">${h(m.body)}</textarea>
 <label class="muted" style="display:block;margin-top:8px">Deciding as <select name="by">${opts}</select></label>
-<div class="dialog-actions"><button name="send" value="1">Send to group</button>
-<button class="ghost" name="send" value="test">Send me a test</button>
+<div class="dialog-actions"><button name="send" value="1" id="msg-send">${phoneMode ? 'Open in Messages to send' : 'Send to group'}</button>
+${phoneMode ? '' : '<button class="ghost" name="send" value="test">Send me a test</button>'}
 <button class="ghost" name="send" value="0">Don't send</button>
 <button class="ghost" type="button" id="msg-later">Decide later</button></div>
-<p class="muted" style="margin-bottom:0">"Decide later" keeps the text waiting under Waiting on you. "Send me a test" texts it only to the person picked above.</p></form></dialog>
-<script>{const d=document.getElementById('msg-dialog');const clean=()=>{const u=new URL(location.href);u.searchParams.delete('msg');u.searchParams.delete('msgnote');history.replaceState(null,'',u)};
+<p class="muted" style="margin-bottom:0">${phoneMode ? 'Messages opens with your group and this text filled in; tap Send there.' : '"Send me a test" texts it only to the person picked above.'} "Decide later" keeps the text waiting under Waiting on you.</p></form></dialog>
+<script>{const d=document.getElementById('msg-dialog');${phoneMode ? `
+const links=${JSON.stringify(Object.fromEntries(config.approvers.map(a => [a.name, groupSmsLink(config, a.name)]))).replace(/</g, '\\u003c')};
+document.getElementById('msg-send').addEventListener('click',(e)=>{e.preventDefault();const f=d.querySelector('form');const b=new URLSearchParams(new FormData(f));b.set('send','1');b.set('js','1');
+const base=links[b.get('by')]||Object.values(links)[0];fetch(f.action,{method:'POST',body:b,credentials:'same-origin',keepalive:true}).catch(()=>{});
+location.href=base+'?body='+encodeURIComponent(b.get('body')||'');setTimeout(()=>location.replace('/?flash='+encodeURIComponent('Opened in Messages. Tap Send there to text the group.')),1500);});` : ''}const clean=()=>{const u=new URL(location.href);u.searchParams.delete('msg');u.searchParams.delete('msgnote');history.replaceState(null,'',u)};
 document.getElementById('msg-later').addEventListener('click',()=>d.close());d.addEventListener('close',clean);d.showModal();}</script>`;
 }
 
@@ -715,6 +731,33 @@ ${owed.length ? `<h2 style="margin-top:14px">Requested, not paid yet</h2><form m
 </div>`;
 }
 
+// GROUP_MODE=phone setup: the test link and how to forward group texts from the phone.
+function phoneCard(config, who, phoneInbox) {
+  if (config.groupMode !== 'phone') return '';
+  const me = config.approvers.find(a => a.name === who) || config.approvers[0];
+  const inbound = `${config.baseUrl}/phone/inbound?key=${config.phone.key}`;
+  const members = config.groupMembers.filter(p => p.phone);
+  const last = phoneInbox?.lastReceived() || [];
+  return `<div class="card" id="group-phone"><h2>Group text (through your phone)</h2>
+<p>Group texts go through your own group conversation with ${h(members.map(p => p.name).join(', '))}. When you approve one, Messages opens with the group and the words filled in, and you tap Send.</p>
+${config.cleaner && !config.cleaner.phone ? `<p class="warn">${h(config.cleaner.name)} has no phone number in CLEANER yet, so Messages would open a conversation without her. Add it in Render when you're ready.</p>` : ''}
+<p class="row"><a class="btn ghost" href="${h(groupSmsLink(config, me?.name))}">Check: open our group in Messages</a><span class="muted">Opens the conversation with nothing typed. It should be your existing group thread.</span></p>
+<h2 style="margin-top:14px">Reading the group text</h2>
+<p>To save the group's texts as notes (and confirm a cleaning when ${h(config.cleaner?.name || 'the cleaner')} says yes), Mark's phone forwards each new message from the group here:</p>
+<p><code style="word-break:break-all">${h(config.phone.key ? inbound : 'Set FEED_TOKEN or PHONE_KEY in Render first')}</code></p>
+<details><summary>Set it up in MacroDroid (free, about 5 minutes)</summary><ol>
+<li>Install <b>MacroDroid</b> from the Play Store and allow it to read notifications.</li>
+<li>Add macro. Trigger: <b>Notification &gt; Notification received</b>, app <b>Messages</b>, text "contains" the group's name as it shows in your notifications (or a member's name).</li>
+<li>Action: <b>Web interactions &gt; HTTP request</b>, method <b>POST</b>, the address above, body type form, with fields <code>title</code> = <code>[notification_title]</code> and <code>text</code> = <code>[notification]</code>.</li>
+<li>Save. In Android settings, set MacroDroid's battery use to <b>Unrestricted</b> so it keeps running.</li>
+<li>Ask Danielle to text the group "test". It should show up below and on the Notes tab.</li></ol>
+<p class="muted">Messages you send yourself don't make a notification, so they aren't forwarded. A muted group doesn't either, so keep notifications on for it.</p></details>
+<h2 style="margin-top:14px">Last messages forwarded</h2>
+${last.length ? `<table>${last.map(l => `<tr><td class="muted">${h(new Date(l.at).toLocaleString('en-US', { timeZone: config.timezone }))}</td><td>${h(l.title)}<div class="muted">${h(l.text)}</div></td><td>${l.known ? h(l.author) : `<span class="warn">Couldn't tell who sent it</span>`}</td></tr>`).join('')}</table>
+<p class="muted">If the sender isn't recognised, add the name your phone shows for them as PHONE_ALIASES in Render, e.g. <code>Jenn=Jennifer Patterson</code>.</p>` : '<p class="muted">Nothing yet.</p>'}
+</div>`;
+}
+
 function textingCard(config, who, flash = '', consents = {}) {
   const me = config.approvers.find(a => a.name === who) || config.approvers[0];
   const only = config.smsOnlyTo || [];
@@ -780,9 +823,10 @@ ${flash && /notification/i.test(flash) ? `<p class="flash">${h(flash)}</p>` : ''
 </script></div>`;
 }
 
-export function morePage({ config, db, who, flash, push }) {
+export function morePage({ config, db, who, flash, push, phoneInbox }) {
   const outbox = db.prepare('SELECT * FROM outbox ORDER BY id DESC LIMIT 40').all();
   return layout('More', `${header({ config, db, who, active: 'more' })}
+${phoneCard(config, who, phoneInbox)}
 ${textingCard(config, who, flash && !/notification/i.test(flash) ? flash : '', Object.fromEntries(db.prepare("SELECT key, value FROM meta WHERE key LIKE 'consent:%'").all().map(r => [r.key.slice(8), JSON.parse(r.value)])))}
 ${push ? pushCard(push, flash) : ''}
 <div class="card"><h2>Sign out</h2><p class="muted">Signs this device out. To sign out every device, change ADMIN_PASSWORD in Render.</p><form method="post" action="/logout"><button class="ghost">Sign out of this device</button></form></div>

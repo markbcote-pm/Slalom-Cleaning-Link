@@ -46,7 +46,18 @@ export function loadConfig(overrides = {}) {
     groupMembers: [...approvers, ...(cleaner ? [cleaner] : [])],
     dryRun: e.DRY_RUN !== '0' || !e.TWILIO_ACCOUNT_SID,
     twilio: { sid: e.TWILIO_ACCOUNT_SID, token: e.TWILIO_AUTH_TOKEN, from: e.TWILIO_FROM, conversationSid: e.TWILIO_CONVERSATION_SID },
+    // 'individual' (Twilio, one text per person), 'conversation' (Twilio group MMS) or
+    // 'phone' (our own group text: Messages opens ready to send, replies forwarded by the phone).
     groupMode: e.GROUP_MODE || 'individual',
+    phone: {
+      // Secret in the address the phone forwards group texts to. Set PHONE_KEY, or it's derived from FEED_TOKEN.
+      key: e.PHONE_KEY || (e.FEED_TOKEN ? crypto.createHash('sha256').update('phone:' + e.FEED_TOKEN).digest('hex').slice(0, 24) : ''),
+      // Between numbers in the sms: link. Google Messages takes ","; set ";" if your app wants that.
+      separator: e.PHONE_SMS_SEPARATOR || ',',
+      // Other names your phone's contacts use, e.g. "Jenn=Jennifer|Jenn P,Danielle=Dani"
+      aliases: Object.fromEntries((e.PHONE_ALIASES || '').split(',').map(x => x.split('=')).filter(x => x.length === 2)
+        .map(([k, v]) => [k.trim().toLowerCase(), v.split('|').map(s => s.trim()).filter(Boolean)])),
+    },
     // Safety switch while testing: when set, real texts go only to these numbers and
     // everything else is logged as "held". Comma separated, e.g. +12076512735
     smsOnlyTo: (e.SMS_ONLY_TO || '').split(',').map(x => x.replace(/\D/g, '').slice(-10)).filter(x => x.length === 10),

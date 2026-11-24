@@ -9,10 +9,11 @@ import { createService } from './service.js';
 import { syncAirbnb } from './sync.js';
 import { cleaningFeed } from './feed.js';
 import { isDate, todayIn, prettyDate, localToUtc } from './dates.js';
-import { layout, messagePage, approvalPage, groupDecisionPage, dashboard, notesPage, todosPage, cleaningPage, inboxPage, staysPage, paymentsCsv, morePage, loginPage } from './views.js';
+import { layout, messagePage, approvalPage, groupDecisionPage, dashboard, notesPage, todosPage, cleaningPage, inboxPage, staysPage, paymentsCsv, morePage, loginPage, phoneSendPage } from './views.js';
 import { createNotes, validTwilioSignature } from './notes.js';
 import { createPush, SERVICE_WORKER } from './push.js';
 import { createFinance, financeRoutes } from './finance.js';
+import { groupSmsLink, createPhoneInbox, inboundFields } from './phone.js';
 import { smsInfoPage, privacyPage, termsPage, confirmationText, joinPage } from './policy.js';
 
 const ASSETS = {
@@ -36,6 +37,7 @@ export function createApp(config, deps = {}) {
   const notifier = deps.notifier || createNotifier(db, config, { onProblem: textProblem, ...deps });
   const service = createService({ db, config, notifier });
   const notes = createNotes({ db, config });
+  const phoneInbox = createPhoneInbox({ db, config, notes, service });
   const fin = createFinance({ db, config });
   const financeRoute = financeRoutes({ db, config, fin });
   const sync = async (opts = {}) => {
@@ -193,10 +195,23 @@ export function createApp(config, deps = {}) {
       const by = validName(body.get('by'));
       const r = body.get('action') === 'decline' ? await service.decline(m[1], by) : await service.approve(m[1], by);
       if (r.error) return send(res, 404, messagePage('Link expired', r.error));
+      if (config.groupMode === 'phone' && r.cleaning.status === 'approved' && !r.already) {
+        const gm = db.prepare("SELECT token FROM group_messages WHERE cleaning_id = ? AND status = 'sent' ORDER BY id DESC").get(r.cleaning.id);
+        if (gm) return redirect(res, `/g/${gm.token}/open?by=${encodeURIComponent(by)}&approved=1`);
+      }
       const done = r.cleaning.status === 'approved'
         ? `Approved by ${by}. The group text has been sent and it's on the shared calendar.`
         : `Declined by ${by}. Nothing was sent to the cleaner.`;
       return send(res, 200, messagePage('Thanks', done));
+    }
+
+    // GROUP_MODE=phone: last step of sending, open Messages with the group and the text filled in.
+    m = p.match(/^\/g\/([\w-]+)\/open$/);
+    if (m && req.method === 'GET') {
+      const gm = db.prepare('SELECT * FROM group_messages WHERE token = ?').get(m[1]);
+      if (!gm || gm.status !== 'sent') return send(res, 404, messagePage('Nothing to send', 'This message was not approved, or was replaced by a newer change.'));
+      const by = validName(url.searchParams.get('by') || cookie(req, 'who'));
+      return send(res, 200, phoneSendPage(gm, groupSmsLink(config, by, gm.body), { approved: url.searchParams.get('approved') === '1', by, inApp: authed(req) }));
     }
 
     // "Should I text the group about this change?" links
@@ -225,6 +240,11 @@ export function createApp(config, deps = {}) {
         }
         const r = await service.decideGroupMessage(m[1], body.get('send') === '1', by, body.get('body'));
         if (r.error) return redirect(res, '/?flash=' + encodeURIComponent(r.error));
+        // The dialog's script already opened Messages; without it, show the Open in Messages step.
+        if (config.groupMode === 'phone' && r.message.status === 'sent' && !r.already) {
+          if (body.get('js') === '1') return send(res, 200, JSON.stringify({ ok: true }), 'application/json');
+          return redirect(res, `/g/${m[1]}/open?by=${encodeURIComponent(by)}`);
+        }
         const month = msgUrl(m[1]).match(/month=([\d-]+)/)?.[1] || '';
         const msg = r.already ? 'That text was already decided.' : r.message.status === 'sent' ? 'Sent to the group text.' : 'Not sent. To change your mind, use Undo under Waiting on you, Recently cleared.';
         return redirect(res, `/?month=${month}&flash=${encodeURIComponent(msg)}`);
@@ -240,10 +260,23 @@ export function createApp(config, deps = {}) {
       }
       const r = await service.decideGroupMessage(m[1], body.get('send') === '1', by, body.get('body'));
       if (r.error) return send(res, 404, messagePage('Link expired', r.error));
+      if (config.groupMode === 'phone' && r.message.status === 'sent' && !r.already) return redirect(res, `/g/${m[1]}/open?by=${encodeURIComponent(by)}`);
       const back = authed(req) ? '<p><a class="btn" href="/">Back to dashboard</a></p>' : '';
       const undo = r.message.status === 'skipped' && !r.already
         ? `<form method="post" style="margin-bottom:10px"><input type="hidden" name="by" value="${by.replace(/"/g, '&quot;')}"><button class="ghost" name="send" value="undo">Undo, bring the message back</button></form>` : '';
       return send(res, 200, messagePage('Done', r.message.status === 'sent' ? 'Sent to the group text.' : 'OK, nothing was sent to the group.', undo + back));
+    }
+
+    // GROUP_MODE=phone: the phone forwards each group-text notification here (MacroDroid/Tasker).
+    if (p === '/phone/inbound' && (req.method === 'POST' || req.method === 'GET')) {
+      if (!config.phone.key || !safeEq(url.searchParams.get('key') || '', config.phone.key)) return send(res, 403, JSON.stringify({ error: 'bad key' }), 'application/json');
+      let raw = '';
+      if (req.method === 'POST') raw = await new Promise((resolve, reject) => { let d = ''; req.on('data', c => { d += c; if (d.length > 1e5) req.destroy(); }); req.on('end', () => resolve(d)); req.on('error', reject); });
+      let json = null;
+      if (/^\s*\{/.test(raw)) { try { json = JSON.parse(raw); } catch {} }
+      const params = new URLSearchParams(json ? '' : raw);
+      for (const [k, v] of url.searchParams) if (k !== 'key' && !params.has(k)) params.set(k, v);
+      return send(res, 200, JSON.stringify(phoneInbox.receive(inboundFields(params, json))), 'application/json');
     }
 
     // Texts coming in from Twilio: replies to the app's number, and group-thread messages.
@@ -313,7 +346,7 @@ export function createApp(config, deps = {}) {
       const year = /^\d{4}$/.test(url.searchParams.get('year') || '') ? url.searchParams.get('year') : todayIn(config.timezone).slice(0, 4);
       return send(res, 200, paymentsCsv(db, config, year), 'text/csv; charset=utf-8', { 'Content-Disposition': `attachment; filename="cleaning-payments-${year}.csv"` });
     }
-    if (req.method === 'GET' && p === '/more') return send(res, 200, morePage({ config, db, who, flash: url.searchParams.get('flash'), push }));
+    if (req.method === 'GET' && p === '/more') return send(res, 200, morePage({ config, db, who, flash: url.searchParams.get('flash'), push, phoneInbox }));
     if (req.method === 'GET' && p === '/todos') return send(res, 200, todosPage({ config, db, who }));
     m = p.match(/^\/cleanings\/(\d+)$/);
     if (req.method === 'GET' && m) {
@@ -522,7 +555,7 @@ export function createApp(config, deps = {}) {
   }
   const stop = () => { clearInterval(timer); server.close(); };
 
-  return { server, db, service, notes, sync, notifier, push, fin, startBackground, stop };
+  return { server, db, service, notes, phoneInbox, sync, notifier, push, fin, startBackground, stop };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
