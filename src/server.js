@@ -9,13 +9,14 @@ import { createService } from './service.js';
 import { syncAirbnb } from './sync.js';
 import { cleaningFeed } from './feed.js';
 import { isDate, todayIn, prettyDate, localToUtc } from './dates.js';
-import { guestLabel, layout, messagePage, approvalPage, groupDecisionPage, dashboard, notesPage, todosPage, cleaningPage, inboxPage, staysPage, paymentsCsv, morePage, loginPage, shareInPage, shareTextPage, guestPhotosPage } from './views.js';
+import { guestLabel, header, layout, messagePage, approvalPage, groupDecisionPage, dashboard, notesPage, todosPage, cleaningPage, inboxPage, staysPage, paymentsCsv, morePage, loginPage, shareInPage, shareTextPage, guestPhotosPage } from './views.js';
 import { createNotes, validTwilioSignature } from './notes.js';
 import { createPush, SERVICE_WORKER } from './push.js';
 import { createFinance, financeRoutes, readForm, sniff } from './finance.js';
 import { createTextPay } from './textpay.js';
 import { createPhotos } from './photos.js';
 import { createPhoneInbox, inboundFields } from './phone.js';
+import { guestMessagesPage, saveGuestSettings } from './guestmsgs.js';
 import { cleanerPage, cleanerFeed, checkCleanerKey, resetCleanerKey } from './cleanerview.js';
 import { liveStamp } from './live.js';
 import { smsInfoPage, privacyPage, termsPage, confirmationText, joinPage } from './policy.js';
@@ -445,6 +446,8 @@ export function createApp(config, deps = {}) {
       return send(res, 200, dashboard({ config, service, db, month, who, flash: url.searchParams.get('flash'), review: Number(url.searchParams.get('review')) || null, msg: url.searchParams.get('msg'), msgnote: url.searchParams.get('msgnote'), textPay }));
     }
     if (req.method === 'GET' && p === '/notes') return send(res, 200, notesPage({ config, db, who }));
+    if (req.method === 'GET' && p === '/guest-messages') return send(res, 200, guestMessagesPage({ db, config, layout, header: header({ config, db, who, active: 'guestmsgs' }), flash: url.searchParams.get('flash') || '' }));
+    if (req.method === 'POST' && p === '/guest-messages') { saveGuestSettings(db, await readBody(req)); return redirect(res, '/guest-messages?flash=' + encodeURIComponent('Saved.')); }
     if (req.method === 'GET' && p === '/inbox') return send(res, 200, inboxPage({ config, service, db, who }));
     if (req.method === 'GET' && p === '/stays') return send(res, 200, staysPage({ config, service, db, who, flash: url.searchParams.get('flash') }));
     if (req.method === 'GET' && p === '/payments.csv') {

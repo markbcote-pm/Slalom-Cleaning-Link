@@ -394,7 +394,7 @@ export function header({ config, db, who, active }) {
   const tab = (key, href, label) => `<a class="tab ${active === key ? 'on' : ''}" href="${href}">${label}</a>`;
   return `<div class="topbar"><div><h1 class="brand"><img src="/icon.svg" alt="" width="28" height="28">Cleaning Link</h1>${config.dryRun ? '<a class="test-badge" href="/more#texting">Test mode</a>' : config.smsOnlyTo?.length ? '<a class="test-badge" href="/more#texting">Texts: safety switch on</a>' : ''}</div>
 <form method="post" action="/who" class="row"><label class="muted hide-sm">You are</label><select name="name" onchange="this.form.submit()" aria-label="You are">${whoSel}</select></form></div>
-${LIVE_JS(liveStamp(db))}<nav class="tabs">${tab('calendar', '/', 'Calendar')}${tab('inbox', '/inbox', `Waiting on you${badge(waiting)}`)}${tab('stays', '/stays', 'Stays')}${tab('todos', '/todos', `To-do${badge(openTodos)}`)}${tab('notes', '/notes', 'Notes')}${tab('payments', '/payments', 'Payments')}${tab('more', '/more', 'More')}</nav>`;
+${LIVE_JS(liveStamp(db))}<nav class="tabs">${tab('calendar', '/', 'Calendar')}${tab('inbox', '/inbox', `Waiting on you${badge(waiting)}`)}${tab('stays', '/stays', 'Stays')}${tab('guestmsgs', '/guest-messages', 'Guest messages')}${tab('todos', '/todos', `To-do${badge(openTodos)}`)}${tab('notes', '/notes', 'Notes')}${tab('payments', '/payments', 'Payments')}${tab('more', '/more', 'More')}</nav>`;
 }
 
 const TAG_LABEL = { supplies: 'Supplies', condition: 'Condition / damage' };

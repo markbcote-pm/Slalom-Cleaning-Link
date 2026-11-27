@@ -1683,3 +1683,32 @@ test('A stay 2 weeks out with no approved cleaning: one push and one text to Mar
     assert.equal(app.service.missingApproved(today).length, 0);
   } finally { app.stop(); }
 });
+
+test('Guest messages tab fills in check-in and check-out messages for each stay', async () => {
+  const { app } = setup();
+  await new Promise(r => app.server.listen(0, r));
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const auth = { Authorization: 'Basic ' + Buffer.from('x:pw').toString('base64') };
+  try {
+    // A stay starting next Tuesday, checking out the Sunday after.
+    const t = new Date(new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }) + 'T12:00:00Z');
+    t.setUTCDate(t.getUTCDate() + ((2 - t.getUTCDay() + 7) % 7 || 7));
+    const inD = t.toISOString().slice(0, 10); t.setUTCDate(t.getUTCDate() + 5); const outD = t.toISOString().slice(0, 10);
+    const long = (d) => { const x = new Date(d + 'T12:00:00Z'), n = x.getUTCDate(); return `${x.toLocaleDateString('en-US', { month: 'long', timeZone: 'UTC' })} ${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th'}`; };
+    await app.sync({ icalText: airbnb([['s1', inD, outD]]), now: new Date() });
+    app.db.prepare("UPDATE bookings SET guest_name = 'John and Donna' WHERE uid = 's1'").run();
+    let page = await (await fetch(`${base}/guest-messages`, { headers: auth })).text();
+    assert.match(page, /Hey John and Donna, welcome/);
+    assert.ok(page.includes(`after 4:00 PM today, Tuesday ${long(inD)}`));
+    assert.ok(page.includes(`For checkout by 11:00 AM on Sunday ${long(outD)}`));
+    assert.match(page, /The code is \{lockbox code\}/, 'not filled in until saved');
+    assert.match(page, /Fill in Wifi name, Wifi password, Lockbox code/);
+    await fetch(`${base}/guest-messages`, { method: 'POST', headers: auth, redirect: 'manual',
+      body: new URLSearchParams({ 'wifi name': 'River', 'wifi password': 'pw123', 'lockbox code': '4321' }) });
+    page = await (await fetch(`${base}/guest-messages`, { headers: auth })).text();
+    assert.match(page, /Wifi: River \/ Password: pw123/);
+    assert.match(page, /The code is 4321\./);
+    assert.doesNotMatch(page, /Fill in/);
+    assert.match(page, /Guest messages/);
+  } finally { app.stop(); }
+});
