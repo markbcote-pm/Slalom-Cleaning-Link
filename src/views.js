@@ -477,7 +477,7 @@ function stateBanner(c, config) {
 const STEP_LABEL = { 'Payment requested': 'Price quoted' };
 function stepPills(c, service, config, who) {
   const live = !['cancelled', 'declined', 'awaiting_approval'].includes(c.status);
-  const tap = { 'Cleaner confirmed': live && (c.group_known_date === c.date || c.cleaner_confirmed_at) && !['completed', 'paid'].includes(c.status) ? 'confirm-dialog' : null,
+  const tap = { Approved: c.status === 'awaiting_approval' ? 'approve-dialog' : null, 'Cleaner confirmed': live && (c.group_known_date === c.date || c.cleaner_confirmed_at) && !['completed', 'paid'].includes(c.status) ? 'confirm-dialog' : null,
     Cleaned: live ? 'cleaned-dialog' : null, 'Payment requested': live ? 'quote-dialog' : null, Paid: live ? 'paid-dialog' : null };
   const pills = service.stageOf(c).map(s => {
     const label = h(STEP_LABEL[s.name] || s.name);
@@ -490,7 +490,16 @@ function stepPills(c, service, config, who) {
   const dollars = c.amount_cents != null ? (c.amount_cents / 100).toFixed(2) : '';
   const methods = ['Venmo', 'Zelle', 'Cash', 'Check', 'Other'].map(m => `<option ${m === c.paid_method ? 'selected' : ''}>${m}</option>`).join('');
   const close = '<button type="button" class="ghost" data-close>Cancel</button>';
-  return `<div class="stages">${pills}</div>${live ? '<p class="muted" style="font-size:12px;margin:4px 0 0">Tap a step to mark it done.</p>' : ''}
+  // A proposal waiting for an OK can be approved right here, same as from Waiting on you.
+  const approve = c.status === 'awaiting_approval' ? `<div class="row" style="margin-top:10px"><button type="button" data-open="approve-dialog">Approve this cleaning</button></div>
+<dialog id="approve-dialog"><form method="post" action="/cleanings"><input type="hidden" name="proposal" value="${c.id}"><input type="hidden" name="back" value="cleaning">
+<h2>Approve the cleaning on ${h(prettyDate(c.date))}?</h2>
+<label for="approve-note" class="muted">Note (optional)</label><textarea name="note" id="approve-note" maxlength="300" placeholder="e.g. deep clean the oven" style="min-height:70px">${h(c.note || '')}</textarea>
+<div class="dialog-actions"><button name="arranged" value="1">Approve, already arranged with ${cleaner}</button>
+<button class="ghost" name="arranged" value="0">Approve and text the group</button>
+<button class="ghost danger-text" name="action" value="decline" formnovalidate onclick="return confirm('Mark this cleaning not needed? Nothing is texted.')">Not needed</button>${close}</div>
+<p class="muted" style="margin-bottom:0">"Already arranged" approves it without texting anyone. "Text the group" shows you the message before it goes out.</p></form></dialog>` : '';
+  return `<div class="stages">${pills}</div>${live ? '<p class="muted" style="font-size:12px;margin:4px 0 0">Tap a step to mark it done.</p>' : ''}${approve}
 ${c.cleaner_confirmed_at
   ? `<dialog id="confirm-dialog"><form method="post" action="/cleanings/${c.id}/unconfirm"><h2>Undo ${cleaner}'s confirmation?</h2><p>${h(prettyDate(c.date))} goes back to waiting on ${cleaner}. Nothing is texted to the group.</p>
 <div class="dialog-actions"><button class="danger">Yes, not confirmed</button>${close}</div></form></dialog>`
@@ -522,7 +531,7 @@ function paymentRow(c, config) {
     : `Price quoted: <b>${money(c.amount_cents)}</b>, not paid yet.`}</p>`;
 }
 
-export function cleaningPage({ config, db, who, service, id, receipts = [], photos = [], photosLink = '' }) {
+export function cleaningPage({ config, db, who, service, id, receipts = [], photos = [], photosLink = '', flash = '' }) {
   const c = service.get(id);
   if (!c) return null;
   const stay = db.prepare("SELECT * FROM bookings WHERE status='active' AND check_out <= ? ORDER BY check_out DESC LIMIT 1").get(c.date);
@@ -535,7 +544,7 @@ export function cleaningPage({ config, db, who, service, id, receipts = [], phot
   const latestId = groupMsgs.filter(g => g.status !== 'superseded').reduce((a, g) => Math.max(a, g.id), 0);
   const stayText = (b) => b ? `${h(guestLabel(b))}, ${h(prettyDate(b.check_in))} to ${h(prettyDate(b.check_out))}` : 'None';
   return layout(`Cleaning ${prettyDate(c.date)}`, `${header({ config, db, who, active: 'calendar' })}
-<div class="card"><p><a href="/?month=${c.date.slice(0, 7)}">&lsaquo; Calendar</a></p><h2>Cleaning ${h(prettyDate(c.date))}</h2>
+${flash ? `<div class="flash">${h(flash)}</div>` : ''}<div class="card"><p><a href="/?month=${c.date.slice(0, 7)}">&lsaquo; Calendar</a></p><h2>Cleaning ${h(prettyDate(c.date))}</h2>
 ${stepPills(c, service, config, who)}
 ${stateBanner(c, config)}
 ${paymentRow(c, config)}
