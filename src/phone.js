@@ -40,6 +40,8 @@ function whoIs(config, label) {
   return loose.length === 1 ? loose[0] : null;
 }
 
+const REPEAT_MS = 90e3;
+
 // Messages' own status notifications, not texts from anyone.
 const SYSTEM_NOTICE = /^(messages is doing work in the background|checking for new messages|sending|sending\s*(?:…|\.\.\.)|downloading|message not sent|chat features? (?:are|is) (?:now )?(?:on|off|ready))\.?$/i;
 
@@ -60,8 +62,9 @@ export function parseNotification(config, { title = '', text = '', from = '' }) 
 
 // Notifications get re-posted (another message arrives, the phone reconnects), so the same
 // text can be forwarded twice. Skip a repeat of the same words from the same person.
-export function createPhoneInbox({ db, config, notes, service, onNote = () => {} }) {
+export function createPhoneInbox({ db, config, notes, service, onNote = () => {}, clock = () => Date.now() }) {
   const recent = new Map();
+  const shown = new Map();   // conversation -> lines of its last notification
   // When a second text arrives before the first notification is cleared, the phone updates
   // that notification and it can carry several lines ("yes I can do that one\nAll done! $10").
   // Each line is handled on its own, and lines already saved are skipped as repeats.
@@ -70,8 +73,16 @@ export function createPhoneInbox({ db, config, notes, service, onNote = () => {}
       .filter(l => l && !/^\d+\s+(new\s+)?messages?$/i.test(l) && !SYSTEM_NOTICE.test(l));
     if (!lines.length && SYSTEM_NOTICE.test(String(fields.text || '').trim())) return { saved: false, reason: 'system notice' };
     remember(fields, parseNotification(config, { ...fields, text: lines[lines.length - 1] || fields.text }));
-    if (lines.length <= 1) return receiveOne({ ...fields, text: lines[0] || '' });
-    const results = lines.map(text => receiveOne({ ...fields, text }));
+    // A notification that grew ("Confirmed" then "Confirmed\nConfirmed") repeats what was already
+    // handled; only the lines after the ones seen last time from this conversation are new.
+    const conv = String(fields.title || '').toLowerCase();
+    const before = shown.get(conv);
+    shown.set(conv, { lines, at: clock() });
+    let fresh = lines;
+    if (before && clock() - before.at < 6 * 3600e3 && lines.length > before.lines.length
+      && before.lines.every((l, i) => l === lines[i])) fresh = lines.slice(before.lines.length);
+    if (lines.length <= 1) return receiveOne({ ...fields, text: fresh[0] || '' });
+    const results = fresh.map(text => receiveOne({ ...fields, text }));
     const saved = results.filter(r => r.saved);
     return { ...(saved[saved.length - 1] || results[results.length - 1]), lines: results.length, savedLines: saved.length };
   }
@@ -85,9 +96,11 @@ export function createPhoneInbox({ db, config, notes, service, onNote = () => {}
   function ingest(n) {
     if (n && n.body) n.body = String(n.body).trim();
     if (!n || !n.body) return { saved: false, reason: 'empty' };
+    // Only a quick re-post of the same notification is a repeat: she really does send the same
+    // word ("Confirmed") to several requests a few minutes apart.
     const key = `${n.author}|${n.body}`.toLowerCase();
-    const now = Date.now();
-    for (const [k, t] of recent) if (now - t > 30 * 60e3) recent.delete(k);
+    const now = clock();
+    for (const [k, t] of recent) if (now - t > REPEAT_MS) recent.delete(k);
     if (recent.has(key)) return { saved: false, reason: 'duplicate', author: n.author };
     recent.set(key, now);
     const note = notes.add({ body: n.body, author: n.author, phone: n.phone, source: 'group' });
