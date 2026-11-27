@@ -35,6 +35,8 @@ export function loadConfig(overrides = {}) {
     syncMinutes: Number(e.SYNC_MINUTES || 30),
     checkoutTime: e.CHECKOUT_TIME || '11:00',
     checkinTime: e.CHECKIN_TIME || '16:00',
+    weatherLat: e.WEATHER_LAT ? Number(e.WEATHER_LAT) : 38.93,   // South Lake Tahoe
+    weatherLon: e.WEATHER_LON ? Number(e.WEATHER_LON) : -119.98,
     cleaningFeeCents: Math.round(Number(e.CLEANING_FEE || 0) * 100),
     adminPassword: e.ADMIN_PASSWORD || '',
     feedToken: e.FEED_TOKEN || '',

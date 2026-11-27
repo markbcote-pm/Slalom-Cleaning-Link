@@ -7,6 +7,7 @@ import { localToUtc } from '../src/dates.js';
 import { cleaningFeed } from '../src/feed.js';
 import { cleaningWindows, guestLabel, cleaningState } from '../src/views.js';
 import { cleanerKey } from '../src/cleanerview.js';
+import { fillMessage, guestSettings, dueGuestAlerts } from '../src/guestmsgs.js';
 
 const NOW = new Date('2026-11-01T18:00:00Z');
 
@@ -1685,7 +1686,10 @@ test('A stay 2 weeks out with no approved cleaning: one push and one text to Mar
 });
 
 test('Guest messages tab fills in check-in and check-out messages for each stay', async () => {
-  const { app } = setup();
+  const { app: plain } = setup(); plain.stop();
+  const app = createApp(plain.config ?? loadConfig({ DOTENV: '0', DB_FILE: ':memory:', DRY_RUN: '1', ADMIN_PASSWORD: 'pw', FEED_TOKEN: 'feedtok', CLEANING_FEE: '120',
+    APPROVERS: 'Mark:+15550000001:mark@example.com,Danielle:+15550000002:', CLEANER: 'Rosa:+15550000003', BASE_URL: 'http://test', TIMEZONE: 'America/Los_Angeles' }),
+    { weatherFetch: async () => { throw new Error('offline'); } });
   await new Promise(r => app.server.listen(0, r));
   const base = `http://127.0.0.1:${app.server.address().port}`;
   const auth = { Authorization: 'Basic ' + Buffer.from('x:pw').toString('base64') };
@@ -1710,5 +1714,45 @@ test('Guest messages tab fills in check-in and check-out messages for each stay'
     assert.match(page, /The code is 4321\./);
     assert.doesNotMatch(page, /Fill in/);
     assert.match(page, /Guest messages/);
+  } finally { app.stop(); }
+});
+
+
+test('Guest messages are personalized: weather, snow, holiday, same-day turnover; alerts at 9 AM and 6 PM', async () => {
+  const { app } = setup();
+  try {
+    const config = { checkinTime: '13:00', checkoutTime: '11:00', timezone: 'America/Los_Angeles' };
+    app.db.prepare("INSERT INTO bookings (uid,check_in,check_out,status,first_seen,last_seen,guest_name) VALUES ('t','2026-11-24','2026-11-29','active','x','x','John and Donna'),('n','2026-11-29','2026-12-02','active','x','x',NULL),('j','2027-07-10','2027-07-12','active','x','x','Sam')").run();
+    const s = guestSettings(app.db);
+    const days = { '2026-11-24': { code: 0, hi: 45, lo: 20, snow: 0 }, '2026-11-26': { code: 73, hi: 30, lo: 15, snow: 6.2 }, '2026-11-29': { code: 71, hi: 31, lo: 18, snow: 2 } };
+    const b = app.db.prepare("SELECT * FROM bookings WHERE uid='t'").get();
+    const msgIn = fillMessage(s.checkin, { booking: b, config, details: { ...s.details, 'lockbox code': '1111' }, db: app.db, days, snow: s.snow });
+    assert.match(msgIn, /host you in Tahoe over the Thanksgiving holiday!/);
+    assert.match(msgIn, /check in anytime after 1:00 PM today, Tuesday November 24th\./);
+    assert.match(msgIn, /Weather: Tuesday looks sunny, with a high around 45°F and a low near 20°F\. Snow is in the forecast Thursday \(about 6 inches\), so plan for chains or 4WD\./);
+    assert.doesNotMatch(msgIn, /Sunday \(/, 'checkout day is not a stay day for the arrival line');
+    assert.match(msgIn, /\nSnow: If more than 4 inches/);
+    assert.match(msgIn, /The code is 1111\./);
+    assert.doesNotMatch(msgIn, /\n\n\n/);
+    const msgOut = fillMessage(s.checkout, { booking: b, config, details: s.details, db: app.db, days, snow: s.snow });
+    assert.match(msgOut, /Snow is forecast for Sunday \(about 2 inches\), so please leave extra time/);
+    assert.match(msgOut, /Our next guests arrive later that day, so we really appreciate you being out by 11:00 AM\./);
+    assert.match(msgOut, /For checkout by 11:00 AM on Sunday November 29th,/);
+    // A July stay with no forecast: Fourth of July only if it overlaps (it doesn't), no snow, no weather.
+    const j = app.db.prepare("SELECT * FROM bookings WHERE uid='j'").get();
+    const summer = fillMessage(s.checkin, { booking: j, config, details: s.details, db: app.db, days: null, snow: s.snow });
+    assert.match(summer, /host you in Tahoe! I hope/);
+    assert.doesNotMatch(summer, /Snow:|Weather:/);
+
+    // Alerts: 9 AM arrival day for check-in, 6 PM the night before for check-out, once each.
+    const cfg = { ...config };
+    const at = (iso) => new Date(iso);
+    assert.deepEqual(dueGuestAlerts(app.db, cfg, at('2026-11-24T16:30:00Z')).map(a => a.which + a.booking.uid), []);            // 8:30 AM
+    assert.deepEqual(dueGuestAlerts(app.db, cfg, at('2026-11-24T17:05:00Z')).map(a => a.which + a.booking.uid), ['int']);       // 9:05 AM
+    assert.deepEqual(dueGuestAlerts(app.db, cfg, at('2026-11-29T01:30:00Z')).map(a => a.which + a.booking.uid), []);            // Nov 28 5:30 PM
+    assert.deepEqual(dueGuestAlerts(app.db, cfg, at('2026-11-29T02:10:00Z')).map(a => a.which + a.booking.uid), ['outt']);      // Nov 28 6:10 PM
+    const r = await app.guestMessageAlerts(at('2026-11-24T17:05:00Z'));
+    assert.deepEqual(r.sent, ['in:t']);
+    assert.equal((await app.guestMessageAlerts(at('2026-11-24T17:35:00Z'))).sent.length, 0);
   } finally { app.stop(); }
 });
