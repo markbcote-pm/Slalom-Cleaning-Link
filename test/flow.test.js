@@ -1659,3 +1659,27 @@ test("Jen's private link shows only the cleanings she was texted, with no login"
     assert.equal((await fetch(`${base}/c/${cleanerKey(app.db)}`)).status, 200);
   } finally { app.stop(); }
 });
+
+test('A stay 2 weeks out with no approved cleaning: one push and one text to Mark and Danielle', async () => {
+  const { app, outbox, clearOutbox } = setup();
+  try {
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    const plus = (n) => { const d = new Date(today + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+    const at = new Date(plus(0) + 'T20:00:00Z');   // noon Pacific today
+    await app.sync({ icalText: airbnb([['a', plus(3), plus(6)], ['b', plus(10), plus(12)], ['c', plus(20), plus(22)]]), now: at });
+    clearOutbox();
+    // a->b turnover (b arrives in 10 days) has only a proposed cleaning: alert. c is 20 days out: not yet.
+    let r = await app.missingCleaningAlert(at);
+    assert.deepEqual(r.alerted, ['b']);
+    const texts = outbox().filter(m => m.channel === 'sms' && /Cleaning heads-up/.test(m.body));
+    assert.equal(texts.length, 2, 'Mark and Danielle');
+    assert.match(texts[0].body, /arrives .* \(10 days away\)\. The .* cleaning still needs your OK\./);
+    // Only once per stay.
+    r = await app.missingCleaningAlert(at);
+    assert.deepEqual(r.alerted, []);
+    // Once approved, a later stay is judged on its own; approving b's turnover clears it.
+    const c = app.db.prepare('SELECT * FROM cleanings WHERE date = ?').get(plus(6));
+    await app.service.approveProposal(c.id, 'Mark', { alreadyArranged: true });
+    assert.equal(app.service.missingApproved(today).length, 0);
+  } finally { app.stop(); }
+});
