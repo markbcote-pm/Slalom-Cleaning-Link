@@ -115,20 +115,44 @@ export function createPush({ db, config, fetchImpl = globalThis.fetch }) {
 
   // A new Airbnb booking (or changed dates) needs Mark or Danielle to OK the cleaning and
   // text the cleaner. Tapping opens the calendar with that cleaning's review dialog.
-  async function bookingNews({ newBookings = [], changed = [], cancelledBookings = [] } = {}) {
+  async function bookingNews({ newBookings = [], changed = [], cancelledBookings = [], arrivals = [], clashes = [] } = {}) {
     const cleaner = config.cleaner?.name || 'the cleaner';
     const out = [];
+    const draft0 = (c) => db.prepare("SELECT 1 FROM group_messages WHERE cleaning_id = ? AND status='pending'").get(c.id);
     for (const [kind, list] of [['new', newBookings], ['changed', changed]]) {
-      for (const { uid, cleaning: c, covered } of list) {
+      for (const { uid, cleaning: c, covered, clash } of list) {
         const b = db.prepare('SELECT * FROM bookings WHERE uid = ?').get(uid);
         if (!b || !c) continue;
         const stay = `${guestLabel(b)}, ${prettyDate(b.check_in)} to ${prettyDate(b.check_out)}`;
         const body = covered ? `${stay}. Already covered by the ${prettyDate(c.date)} cleaning.`
+          : clash ? `${stay}. Cleaning moved to ${prettyDate(c.date)}, but the next guests arrive ${prettyDate(clash)}. Check the dates.`
+          : kind === 'changed' && c.status !== 'awaiting_approval' ? `${stay}. Cleaning moved to ${prettyDate(c.date)}.${draft0(c) ? ` Tap to text ${cleaner} the new date.` : ''}`
           : `${stay}. Cleaning proposed for ${prettyDate(c.date)}. Tap to approve and text ${cleaner}.`;
+        const draft = kind === 'changed' && db.prepare("SELECT token FROM group_messages WHERE cleaning_id = ? AND status='pending' ORDER BY id DESC LIMIT 1").get(c.id);
         const msg = { title: kind === 'new' ? 'New Airbnb booking' : 'Airbnb booking dates changed', body,
-          url: covered ? `/?month=${b.check_in.slice(0, 7)}` : `/?month=${c.date.slice(0, 7)}&review=${c.id}` };
+          url: covered ? `/?month=${b.check_in.slice(0, 7)}` : draft ? `/?month=${c.date.slice(0, 7)}&msg=${draft.token}` : `/?month=${c.date.slice(0, 7)}&review=${c.id}` };
         out.push({ ...msg, results: await send(msg) });
       }
+    }
+    // The next guests' arrival moved: the cleaning before them is now in a shorter or longer window.
+    for (const { uid, cleaning: c, from, to, fits, message: m } of arrivals) {
+      const b = db.prepare('SELECT * FROM bookings WHERE uid = ?').get(uid);
+      if (!b || !c) continue;
+      const pending = m && m.status === 'pending';
+      const body = `Next guests (${guestLabel(b)}) now arrive ${prettyDate(to)} (was ${prettyDate(from)}). `
+        + (!fits ? `That's before the ${prettyDate(c.date)} cleaning. Tap to pick a new day.`
+          : pending ? `The ${prettyDate(c.date)} cleaning still fits. Tap to give ${cleaner} a heads-up.`
+            : `The ${prettyDate(c.date)} cleaning still fits.`);
+      const month = c.date.slice(0, 7);
+      const msg = { title: fits ? 'Next arrival changed' : 'Cleaning no longer fits', body,
+        url: !fits ? `/cleanings/${c.id}` : pending ? `/?month=${month}&msg=${m.token}` : `/?month=${month}` };
+      out.push({ ...msg, results: await send(msg) });
+    }
+    for (const { uid, cleaning: c } of clashes) {
+      const b = db.prepare('SELECT * FROM bookings WHERE uid = ?').get(uid);
+      if (!b || !c) continue;
+      const msg = { title: 'Cleaning during a stay', body: `Guests (${guestLabel(b)}) now stay ${prettyDate(b.check_in)} to ${prettyDate(b.check_out)}, over the ${prettyDate(c.date)} cleaning. Tap to pick a new day.`, url: `/cleanings/${c.id}` };
+      out.push({ ...msg, results: await send(msg) });
     }
     // A cancelled booking: the cleaning came off the calendar. If the cleaner had already been
     // texted that date, tapping opens the "text the group?" dialog; nothing is sent without a tap.

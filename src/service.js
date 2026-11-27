@@ -344,6 +344,39 @@ export function createService({ db, config, notifier }) {
     return { cleaning: moved, message: msg };
   }
 
+  // ---- Airbnb changes that touch a cleaning without moving it -----------------------
+
+  // The next guests' arrival moved. The cleaning before it stays put, but the turnover window
+  // changed: log it, warn if the cleaning is now after the arrival, and (if the cleaner had
+  // been texted) draft a heads-up for the group. Nothing goes to the group without a tap.
+  async function arrivalChanged(id, oldIn, newIn) {
+    const c = get(id);
+    if (!c || ['cancelled', 'declined', 'paid', 'completed'].includes(c.status)) return { cleaning: c };
+    const fits = c.date <= newIn;
+    const way = newIn < oldIn ? 'earlier' : 'later';
+    logEvent(id, 'Next arrival changed', `Next guests now arrive ${prettyDate(newIn)} (was ${prettyDate(oldIn)})${fits ? '' : ', before this cleaning'}`);
+    if (!fits) await notifier.approvers('Cleaning no longer fits', () =>
+      `Airbnb change: the next guests now arrive ${prettyDate(newIn)}, before the ${prettyDate(c.date)} cleaning. Pick a new day: ${link(`/cleanings/${id}`)}`);
+    if (c.status !== 'approved' || !c.group_known_date) return { cleaning: c, fits, way };
+    const sameDay = newIn === c.date;
+    const body = `HEADS UP for the ${prettyDate(c.date)} cleaning at ${config.propertyName}: the next guests now arrive `
+      + (sameDay ? `${prettyTime(config.checkinTime)} the same day, so please be done by then.` : `${prettyDate(newIn)}, ${way} than before (${prettyDate(oldIn)}).`)
+      + (fits ? '' : ' That\'s before this cleaning, so we need to pick a new day.');
+    const message = await askAboutGroupMessage(c, 'custom', body, { askBy: fits && way === 'later' ? 'dashboard' : 'text' });
+    return { cleaning: get(id), fits, way, message };
+  }
+
+  // A stay now runs past a cleaning that was moved off its checkout day by hand: the
+  // cleaning would land while guests are there. Warn; the date is Mark's to change.
+  async function stayOverlaps(id, checkIn, checkOut) {
+    const c = get(id);
+    if (!c || ['cancelled', 'declined', 'paid', 'completed'].includes(c.status)) return { cleaning: c };
+    logEvent(id, 'Guests there that day', `Airbnb stay now runs ${prettyDate(checkIn)} to ${prettyDate(checkOut)}, over this cleaning`);
+    await notifier.approvers('Cleaning during a stay', () =>
+      `Airbnb change: guests now stay until ${prettyDate(checkOut)}, so the ${prettyDate(c.date)} cleaning falls during their stay. Pick a new day: ${link(`/cleanings/${id}`)}`);
+    return { cleaning: c, fits: false };
+  }
+
   async function cancel(id, by, { fromAirbnb = false } = {}) {
     const c = get(id);
     if (!c || ['cancelled', 'paid', 'completed'].includes(c.status)) return { cleaning: c };
@@ -676,7 +709,7 @@ export function createService({ db, config, notifier }) {
   }
 
   return {
-    get, list, stageOf, describe, windowFor, cleaningInWindow, addPersonalStay, updatePersonalStay, removePersonalStay, requestApproval, approve, approveProposal, dropCoveredProposals, decline, decideGroupMessage, unsendGroupMessage, remove, testGroupMessage, undoSkip, restoreDeclined, addManual, move, cancel,
+    get, list, stageOf, describe, windowFor, cleaningInWindow, addPersonalStay, updatePersonalStay, removePersonalStay, requestApproval, approve, approveProposal, dropCoveredProposals, decline, decideGroupMessage, unsendGroupMessage, remove, testGroupMessage, undoSkip, restoreDeclined, addManual, move, cancel, arrivalChanged, stayOverlaps,
     customGroupMessage, confirmByCleaner, cleanerReply, saysYes, mentionedDates, datesIn, hooks, autoComplete, recordPaymentRequest, markPaid, unmarkPaid, markCleaned, logEvent, update,
   };
 }

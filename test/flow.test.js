@@ -1585,3 +1585,39 @@ test('Jen answers each request with "Confirmed": each one books the request it f
   assert.equal(app.db.prepare("SELECT COUNT(*) n FROM events WHERE stage='Cleaner confirmed'").get().n, before + 1);
   assert.ok(app.service.get(ids[0]).cleaner_confirmed_at, 'the remaining request');
 });
+
+test('Airbnb moves the next arrival: the cleaning before it is checked and Jen can get a heads-up', async () => {
+  const { app, outbox, clearOutbox, sync } = setup();
+  try {
+    await sync([['s1', '2026-11-05', '2026-11-08'], ['s2', '2026-11-12', '2026-11-15']]);
+    const c = app.db.prepare("SELECT * FROM cleanings WHERE date = '2026-11-08'").get();
+    const { message } = await app.service.approveProposal(c.id, 'Mark');
+    await app.service.decideGroupMessage(message.token, true, 'Mark');
+    clearOutbox();
+    // Next guests now arrive the day of the cleaning: still fits, a heads-up is drafted and Mark is asked.
+    let r = await sync([['s1', '2026-11-05', '2026-11-08'], ['s2', '2026-11-08', '2026-11-15']]);
+    assert.deepEqual(r.arrivals.map(a => [a.cleaning.id, a.from, a.to, a.fits]), [[c.id, '2026-11-12', '2026-11-08', true]]);
+    assert.match(r.arrivals[0].message.body, /HEADS UP for the .*Nov 8.* cleaning.*arrive \d+ PM the same day/);
+    assert.equal(r.arrivals[0].message.status, 'pending');
+    assert.ok(outbox().some(m => /should I tell the group text/.test(m.body)));
+    assert.equal(app.db.prepare("SELECT COUNT(*) n FROM group_messages WHERE status='sent'").get().n, 1, 'nothing sent to the group');
+    // Arrival before the cleaning: it doesn't fit, Mark is warned.
+    clearOutbox();
+    r = await sync([['s1', '2026-11-05', '2026-11-08'], ['s2', '2026-11-07', '2026-11-15']]);
+    assert.equal(r.arrivals[0].fits, false);
+    assert.ok(outbox().some(m => /before the .*Nov 8.* cleaning. Pick a new day/.test(m.body)));
+    assert.match(app.db.prepare("SELECT detail FROM events WHERE cleaning_id = ? AND stage = 'Next arrival changed' ORDER BY id DESC").get(c.id).detail, /before this cleaning/);
+    // A later arrival only drafts the heads-up, without texting Mark.
+    clearOutbox();
+    r = await sync([['s1', '2026-11-05', '2026-11-08'], ['s2', '2026-11-13', '2026-11-15']]);
+    assert.equal(r.arrivals[0].fits, true);
+    assert.equal(outbox().length, 0);
+    // A cleaning moved by hand that the extended stay now runs over: warned, not moved.
+    await app.service.move(c.id, '2026-11-10', 'Mark');
+    clearOutbox();
+    r = await sync([['s1', '2026-11-05', '2026-11-11'], ['s2', '2026-11-13', '2026-11-15']]);
+    assert.deepEqual(r.clashes.map(x => x.cleaning.id), [c.id]);
+    assert.equal(app.service.get(c.id).date, '2026-11-10');
+    assert.ok(outbox().some(m => /falls during their stay/.test(m.body)));
+  } finally { app.stop(); }
+});

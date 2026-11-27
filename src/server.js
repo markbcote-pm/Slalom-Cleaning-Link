@@ -54,7 +54,7 @@ export function createApp(config, deps = {}) {
   const financeRoute = financeRoutes({ db, config, fin });
   const sync = async (opts = {}) => {
     const r = await syncAirbnb({ db, config, service, fetchImpl: deps.fetchImpl, ...opts });
-    if (r.newBookings?.length || r.changed?.length || r.cancelledBookings?.length) {
+    if (r.newBookings?.length || r.changed?.length || r.cancelledBookings?.length || r.arrivals?.length || r.clashes?.length) {
       try { await push.bookingNews(r); } catch (e) { console.error('Booking notification failed:', e.message); }
     }
     return r;
