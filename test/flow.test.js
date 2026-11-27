@@ -1116,11 +1116,29 @@ test('GROUP_MODE=phone: approving opens Messages with the group; forwarded notif
     // Danielle approves from her text link: Messages should open to Mark + Jenn, not to herself.
     const r = await fetch(`${base}/a/${c.approval_token}`, { method: 'POST', body: new URLSearchParams({ by: 'Danielle' }), redirect: 'manual' });
     assert.equal(r.status, 303);
-    const page = await (await fetch(base + r.headers.get('location'))).text();
-    assert.match(page, /Last step: send it to the group/);
+    const loc = r.headers.get('location');
+    assert.match(loc, /^\/g\/[\w-]+\?by=Danielle$/);
+    const page = await (await fetch(base + loc)).text();
     assert.match(page, /Share to the group/);
     assert.match(page, /New cleaning request/);
+    const gtok = loc.match(/\/g\/([\w-]+)/)[1];
+    const status = () => app.db.prepare('SELECT status FROM group_messages WHERE token = ?').get(gtok).status;
+    assert.equal(status(), 'pending');                       // approving alone sends nothing
+    // A plain "send" (a computer, or no script) is refused and the text keeps waiting.
+    const plain = await fetch(`${base}/g/${gtok}`, { method: 'POST', body: new URLSearchParams({ by: 'Danielle', send: '1' }) });
+    assert.equal(plain.status, 409);
+    assert.equal(status(), 'pending');
+    // Shared from a phone: now it counts.
+    const shared = await (await fetch(`${base}/g/${gtok}`, { method: 'POST', body: new URLSearchParams({ by: 'Danielle', send: '1', shared: '1', js: '1' }) })).json();
+    assert.equal(shared.status, 'sent');
     assert.equal(app.db.prepare("SELECT status FROM outbox WHERE channel='group'").get().status, 'on phone');
+    // "Didn't go out? Send again" puts it back to waiting (signed in only).
+    const auth2 = { Authorization: 'Basic ' + Buffer.from('x:pw').toString('base64') };
+    assert.match(await (await fetch(`${base}/cleanings/${c.id}`, { headers: auth2 })).text(), /Didn't go out\? Send again/);
+    await fetch(`${base}/g/${gtok}`, { method: 'POST', headers: auth2, body: new URLSearchParams({ by: 'Mark', send: 'unsend' }), redirect: 'manual' });
+    assert.equal(status(), 'pending');
+    await fetch(`${base}/g/${gtok}`, { method: 'POST', body: new URLSearchParams({ by: 'Danielle', send: '1', shared: '1', js: '1' }) });
+    assert.equal(status(), 'sent');
 
     // Wrong key is refused.
     assert.equal((await fetch(`${base}/phone/inbound?key=nope`, { method: 'POST', body: 'text=yes' })).status, 403);
