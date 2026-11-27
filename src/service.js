@@ -5,6 +5,20 @@ import { prettyDate, prettyTime, todayIn, addDays, isDate } from './dates.js';
 const token = () => crypto.randomBytes(18).toString('base64url');
 const nowIso = () => new Date().toISOString();
 
+// "the third", "Dec twenty-first" -> "the 3rd", "Dec 21st", so dates written as words are read
+// like digits. Only after "the" or a month, so "first time" stays as it is.
+const ORD = ['', 'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth', 'eleventh', 'twelfth',
+  'thirteenth', 'fourteenth', 'fifteenth', 'sixteenth', 'seventeenth', 'eighteenth', 'nineteenth', 'twentieth'];
+const suffix = (n) => (n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th');
+export function ordinalWords(text) {
+  return String(text ?? '').replace(/\b(the|jan[a-z]*|feb[a-z]*|mar[a-z]*|apr[a-z]*|may|jun[a-z]*|jul[a-z]*|aug[a-z]*|sep[a-z]*|oct[a-z]*|nov[a-z]*|dec[a-z]*)(\.?\s+)(?:(twenty|thirty)[\s-]?)?([a-z]+)\b/gi, (all, lead, gap, tens, w) => {
+    let n = ORD.indexOf(w.toLowerCase());
+    if (tens) { if (n < 1 || n > 9) return all; n += tens.toLowerCase() === 'twenty' ? 20 : 30; }
+    else if (n < 1) { if (/^thirtieth$/i.test(w)) n = 30; else return all; }
+    return n > 31 ? all : `${lead}${gap}${n}${suffix(n)}`;
+  });
+}
+
 // Stages shown on the dashboard for every cleaning, in order.
 export const STAGES = ['Booked', 'Approval requested', 'Approved', 'Cleaner texted', 'Cleaner confirmed', 'Cleaned', 'Payment requested', 'Paid'];
 
@@ -375,7 +389,7 @@ export function createService({ db, config, notifier }) {
       || /^(👍|✅|👌)/u.test(t) || /\b(i'?ll be there|see you then|i'?m in)\b/.test(t);
   }
   function mentionedDates(text, dates) {
-    const t = String(text || '').toLowerCase();
+    const t = ordinalWords(String(text || '').replace(/[\u2018\u2019\u02BC]/g, "'")).toLowerCase();
     return dates.filter(d => {
       const [, m, day] = d.split('-').map(Number);
       const mon = MONTHS[m - 1];
@@ -388,7 +402,7 @@ export function createService({ db, config, notifier }) {
   // date): "Dec 5", "12/5", "the 5th", "Saturday", "the day after".
   const WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
   function datesIn(text, near) {
-    const t = String(text || '').toLowerCase();
+    const t = ordinalWords(text).toLowerCase();
     const found = [];
     const nearest = (cands) => cands.filter(isDate).sort((a, b) => Math.abs(dayDiff(a, near)) - Math.abs(dayDiff(b, near)))[0];
     const ymd = (y, m, d) => `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
@@ -420,7 +434,7 @@ export function createService({ db, config, notifier }) {
       && !/\b(done|finished|all set|paid)\b/.test(t)
       && !/\b(can'?t wait|no problem|no prob|no worries|no rush)\b/.test(t);
   }
-  function cleanerSuggestion(body) {
+  function cleanerSuggestion(body, { yes = false } = {}) {
     const today = todayIn(config.timezone);
     const open = db.prepare(`SELECT * FROM cleanings WHERE status = 'approved' AND date >= ? AND group_known_date IS NOT NULL ORDER BY date`).all(today);
     if (!open.length) return null;
@@ -432,9 +446,13 @@ export function createService({ db, config, notifier }) {
       return { ok: d !== c.date && d >= from && d <= to, prior, next, from, to };
     };
     let target = null, offered = [];
-    if (named.length === 1) target = open.find(c => c.date === named[0]);
+    // Which cleaning she means: the one whose date she names (the soonest, if "the 4th" could
+    // be more than one month), else the only one, else the only one still waiting on her answer.
+    const waiting = open.filter(c => c.group_known_date === c.date && !c.cleaner_confirmed_at);
+    if (named.length) target = open.find(c => c.date === [...named].sort()[0]);
     else if (open.length === 1) target = open[0];
-    if (target) offered = datesIn(body, target.date).filter(d => d !== target.date);
+    else if (waiting.length === 1) target = waiting[0];
+    if (target) offered = datesIn(body, target.date).filter(d => d !== target.date && !(named.length > 1 && named.includes(d)));
     else {
       // Several open cleanings and none named: the one whose turnover her day falls in.
       const hits = open.map(c => ({ c, ds: datesIn(body, c.date).filter(d => !open.some(o => o.date === d) && fits(c, d).ok) })).filter(x => x.ds.length);
@@ -445,6 +463,7 @@ export function createService({ db, config, notifier }) {
     const pick = offered.find(d => fits(target, d).ok);
     const quote = `"${String(body).trim().slice(0, 80)}"`;
     if (!pick) {
+      if (yes) return null;
       const d = offered[0], f = fits(target, d);
       const why = d < f.from ? (d < today ? 'that day has passed' : `the guests before don't check out until ${prettyDate(f.from)}`)
         : f.next ? `the next guests arrive ${prettyDate(f.next.check_in)} at ${prettyTime(config.checkinTime)}` : 'that is more than two weeks later';
@@ -467,8 +486,11 @@ export function createService({ db, config, notifier }) {
   const plain = (s) => String(s ?? '').replace(/[\u2018\u2019\u02BC\u2032`´]/g, "'");
   function cleanerReply({ body, phone = null, author = null }) {
     body = plain(body);
-    if (isCleaner(phone, author) && !saysYes(body) && offersOtherDay(body)) {
-      const s = cleanerSuggestion(body);
+    // "Can't do the 4th, how about the 3rd?" or "Yes, the 3rd" (a yes to a different day than
+    // she was asked about): try moving the cleaning to her day. A plain yes, or a yes naming the
+    // cleaning's own date, finds no other day and falls through to confirming.
+    if (isCleaner(phone, author) && (saysYes(body) ? !/\b(both|all|each)\b/i.test(body) : offersOtherDay(body))) {
+      const s = cleanerSuggestion(body, { yes: saysYes(body) });
       if (s) return { confirmed: [], suggestion: s };
     }
     if (!isCleaner(phone, author) || !saysYes(body)) return { confirmed: [] };

@@ -1400,3 +1400,33 @@ test('cleaner says no and offers another day: moved if it fits between stays, el
   // A "done" text with a date is not a suggestion.
   assert.equal(app.service.cleanerReply({ body: `${md(plus(12))} cleaning is done`, author: 'Rosa' }).suggestion, undefined);
 });
+
+test('cleaner offers another day: words ("the third"), "yes, the 3rd", and other cleanings on the calendar', async () => {
+  const { app } = setup();
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  const plus = (n) => { const d = new Date(today + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  const book = (uid, a, b) => app.db.prepare("INSERT INTO bookings (uid, check_in, check_out, summary, status, first_seen, last_seen) VALUES (?,?,?,'Reserved','active','x','x')").run(uid, a, b);
+  const mk = (d, confirmed) => Number(app.db.prepare("INSERT INTO cleanings (source, date, status, group_known_date, cleaner_confirmed_at, created_at, updated_at) VALUES ('manual', ?, 'approved', ?, ?, 'x', 'x')").run(d, d, confirmed ? 'x' : null).lastInsertRowid);
+  const ords = ['', 'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth', 'eleventh', 'twelfth', 'thirteenth', 'fourteenth', 'fifteenth', 'sixteenth', 'seventeenth', 'eighteenth', 'nineteenth', 'twentieth'];
+  const word = (d) => { const n = +d.slice(8); return n <= 20 ? ords[n] : n === 30 ? 'thirtieth' : `${n < 30 ? 'twenty' : 'thirty'}-${ords[n % 10]}`; };
+  // Guests leave day 5, next arrive day 12. Two more confirmed cleanings later on.
+  book('a', plus(2), plus(5)); book('b', plus(12), plus(14)); book('c', plus(30), plus(33));
+  const id = mk(plus(6), false);
+  mk(plus(14), true); mk(plus(33), true);
+  const reply = (body) => app.service.cleanerReply({ body, author: 'Rosa' });
+  // Ordinals in words, curly apostrophe, several cleanings on the calendar.
+  let r = reply(`Sorry I can’t do the ${word(plus(6))} but can I do the day after?`);
+  assert.equal(r.suggestion?.moved, true, JSON.stringify(r));
+  assert.equal(app.service.get(id).date, plus(7));
+  // "Yes, the Nth" naming another day that fits moves it (and confirms), instead of confirming the old day.
+  app.db.prepare("UPDATE cleanings SET cleaner_confirmed_at = NULL WHERE id = ?").run(id);
+  const n9 = +plus(9).slice(8), sfx = n9 % 10 === 1 && n9 !== 11 ? 'st' : n9 % 10 === 2 && n9 !== 12 ? 'nd' : n9 % 10 === 3 && n9 !== 13 ? 'rd' : 'th';
+  r = reply(`Yes the ${n9}${sfx}`);
+  assert.equal(app.service.get(id).date, plus(9), JSON.stringify(r));
+  assert.ok(app.service.get(id).cleaner_confirmed_at);
+  // A plain yes still just confirms.
+  app.db.prepare("UPDATE cleanings SET cleaner_confirmed_at = NULL WHERE id = ?").run(id);
+  r = reply('Yes!');
+  assert.deepEqual(r.confirmed.map(c => c.id), [id]);
+  assert.equal(app.service.get(id).date, plus(9));
+});
