@@ -16,6 +16,7 @@ import { createFinance, financeRoutes, readForm, sniff } from './finance.js';
 import { createTextPay } from './textpay.js';
 import { createPhotos } from './photos.js';
 import { createPhoneInbox, inboundFields } from './phone.js';
+import { liveStamp } from './live.js';
 import { smsInfoPage, privacyPage, termsPage, confirmationText, joinPage } from './policy.js';
 
 const ASSETS = {
@@ -364,6 +365,8 @@ export function createApp(config, deps = {}) {
       if (req.method === 'GET' && !wantsJson(req)) return redirect(res, '/login' + (p === '/' && !url.search ? '' : '?next=' + encodeURIComponent(p + url.search)));
       return send(res, 401, 'Login required', 'text/plain');
     }
+    // Signed-in pages check this every few seconds and refresh when the data changes.
+    if (p === '/live') return send(res, 200, JSON.stringify({ v: liveStamp(db) }), 'application/json', { 'Cache-Control': 'no-store' });
     const who = validName(decodeURIComponent(cookie(req, 'who') || ''));
     // Keep "Waiting on you" honest: clear proposals already covered by a confirmed cleaning.
     if (req.method === 'GET' && ['/', '/inbox', '/stays'].includes(p)) service.dropCoveredProposals(who || 'the app');

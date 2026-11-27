@@ -1304,3 +1304,35 @@ test('A confirmed cleaning can be put back to waiting on the cleaner from its pa
     assert.match(await (await fetch(`${base}/cleanings/${id}`, { headers: auth })).text(), /action="\/cleanings\/\d+\/confirm"/);
   } finally { app.server.close(); app.stop?.(); }
 });
+
+test('live screens: pages carry a fingerprint that changes only when the data does', async () => {
+  const { app, sync } = setup();
+  await new Promise(r => app.server.listen(0, r));
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const auth = { Authorization: 'Basic ' + Buffer.from('x:pw').toString('base64') };
+  const live = async () => (await (await fetch(base + '/live', { headers: auth })).json()).v;
+  try {
+    assert.equal((await fetch(base + '/live', { headers: { accept: 'application/json' } })).status, 401);
+    await sync([['s1', '2026-11-05', '2026-11-08']]);
+    // Every signed-in page embeds the same fingerprint /live reports, so opening a page never
+    // triggers a refresh by itself (a page that wrote on GET would refresh forever).
+    for (const page of ['/?month=2026-11', '/inbox', '/stays', '/payments', '/more', '/todos', '/notes']) {
+      const html = await (await fetch(base + page, { headers: auth })).text();
+      const v = html.match(/const v0="([0-9a-f]{16})"/)?.[1];
+      assert.ok(v, page);
+      assert.equal(v, await live(), page);
+    }
+    const before = await live();
+    // The Airbnb check finding the same stays again changes nothing on screen.
+    await sync([['s1', '2026-11-05', '2026-11-08']]);
+    assert.equal(await live(), before);
+    // A new booking does.
+    await sync([['s1', '2026-11-05', '2026-11-08'], ['s2', '2026-11-12', '2026-11-14']]);
+    const afterBooking = await live();
+    assert.notEqual(afterBooking, before);
+    // So does approving a cleaning.
+    const c = app.db.prepare("SELECT approval_token FROM cleanings WHERE status='awaiting_approval' ORDER BY date LIMIT 1").get();
+    await app.service.approve(c.approval_token, 'Mark');
+    assert.notEqual(await live(), afterBooking);
+  } finally { app.server.close(); }
+});
