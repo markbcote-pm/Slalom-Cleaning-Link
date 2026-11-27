@@ -85,6 +85,31 @@ CREATE TABLE IF NOT EXISTS todos (
   done_at TEXT,
   done_by TEXT
 );
+-- Payment texts from the group ("done, $140" / "paid") the app couldn't tie to one cleaning.
+CREATE TABLE IF NOT EXISTS text_matches (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  note_id INTEGER,
+  kind TEXT NOT NULL,                             -- done | paid
+  body TEXT NOT NULL,
+  author TEXT,
+  amount_cents INTEGER,
+  method TEXT,
+  at TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',         -- pending | applied | dismissed
+  cleaning_ids TEXT,                              -- what it was applied to, comma separated
+  decided_by TEXT,
+  created_at TEXT NOT NULL
+);
+-- Photos the cleaner sent after a cleaning, saved to share with the next guest.
+CREATE TABLE IF NOT EXISTS photos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  cleaning_id INTEGER NOT NULL,
+  file TEXT NOT NULL,
+  mime TEXT NOT NULL,
+  bytes INTEGER NOT NULL,
+  added_by TEXT,
+  created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 -- The rental as a business: money in and out, counted on the day it moved (cash basis).
 -- Cleaner payments stay on the cleanings table and are added in as expenses when reporting.
@@ -136,6 +161,7 @@ export function openDb(config) {
   // arranged with her directly. Older arranged cleanings are backfilled from their history.
   const ccols = db.prepare('PRAGMA table_info(cleanings)').all().map(c => c.name);
   if (!ccols.includes('paid_by')) db.exec('ALTER TABLE cleanings ADD COLUMN paid_by TEXT');  // Mark or Danielle
+  if (!ccols.includes('photos_token')) db.exec('ALTER TABLE cleanings ADD COLUMN photos_token TEXT');  // secret link to share photos with a guest
   if (!ccols.includes('cleaner_confirmed_at')) {
     db.exec('ALTER TABLE cleanings ADD COLUMN cleaner_confirmed_at TEXT');
     db.exec(`UPDATE cleanings SET cleaner_confirmed_at = updated_at WHERE group_known_date = date AND id IN

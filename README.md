@@ -60,3 +60,16 @@ Anything can be re-filed by hand, and texts from another thread can be pasted in
    and set `BASE_URL` to the Render address so links in texts work. Any always-on host with a disk also works.
 4. **Calendar:** in Google Calendar, Other calendars > From URL, paste `BASE_URL/feed/FEED_TOKEN.ics`.
    Skylight then shows it through Google. Moves happen in this app, not in Google (the feed is read-only).
+
+## Group text through your own phone (GROUP_MODE=phone)
+
+No Twilio needed. Set `GROUP_MODE=phone` in Render and make sure APPROVERS and CLEANER have everyone's numbers.
+
+- **Sending:** approving a cleaning (or tapping "Open in Messages to send") opens the phone's Messages app with the group's numbers and the text filled in. Tap Send and it goes into your existing group thread from your own number. Every group text already needs your OK, so that tap is the OK.
+- **Reading:** an automation app on Mark's phone (MacroDroid, free) forwards each group-text notification to `/phone/inbound?key=...`. The exact address and step-by-step setup are on the More tab. Forwarded texts become notes, supply notes become to-dos, and the cleaner's "yes" confirms the cleaning.
+- Switch back to Twilio any time by setting `GROUP_MODE` to `individual` or `conversation`.
+
+### Payments and photos from the group text
+
+- The cleaner's "done" texts mark that cleaning cleaned, with the amount if she gives one ("All done, $140"). An owner's "paid" text ("Paid, sent on Venmo") marks what's owed as paid. A text that could fit more than one cleaning waits, and the app asks which cleaning it was about the next time someone opens it. Your own texts aren't forwarded by your phone, so mark your own payments in the app.
+- Photos: the app is a share target. In Messages, select the cleaner's photos, tap Share and pick **Cleaning**, then confirm the cleaning. Each cleaning's page can share the photos through the phone's share menu (to Airbnb) or copy a private guest link (`/p/...`).

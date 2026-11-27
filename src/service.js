@@ -514,6 +514,6 @@ export function createService({ db, config, notifier }) {
 
   return {
     get, list, stageOf, describe, windowFor, cleaningInWindow, addPersonalStay, updatePersonalStay, removePersonalStay, requestApproval, approve, approveProposal, dropCoveredProposals, decline, decideGroupMessage, testGroupMessage, undoSkip, restoreDeclined, addManual, move, cancel,
-    customGroupMessage, confirmByCleaner, cleanerReply, autoComplete, recordPaymentRequest, markPaid, unmarkPaid, markCleaned, logEvent, update,
+    customGroupMessage, confirmByCleaner, cleanerReply, mentionedDates, autoComplete, recordPaymentRequest, markPaid, unmarkPaid, markCleaned, logEvent, update,
   };
 }
