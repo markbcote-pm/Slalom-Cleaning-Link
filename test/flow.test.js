@@ -1194,6 +1194,14 @@ test('Group payment texts: "done, $140" bills the cleaning, "paid" pays it, uncl
   r = say('Jenn', 'Done, it was $150');
   assert.ok(r.pending);
   assert.equal(app.textPay.pending().length, 1);
+  // A "done" text that names a coming cleaning's date ("Dec 4 cleaning is done") goes to it.
+  const plus = (n) => minus(-n);
+  const soon = mk(plus(7));
+  const [, sm, sd] = plus(7).split('-').map(Number);
+  const early = say('Jenn', `${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][sm - 1]} ${sd} cleaning is done`);
+  assert.equal(early.applied?.id, soon);
+  assert.equal(app.service.get(soon).status, 'completed');
+  assert.equal(app.textPay.pending().length, 1);
   await new Promise(res => app.server.listen(0, res));
   const base = `http://127.0.0.1:${app.server.address().port}`;
   const auth = { Authorization: 'Basic ' + Buffer.from('x:pw').toString('base64') };

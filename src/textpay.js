@@ -59,12 +59,13 @@ export function createTextPay({ db, config, service, onUnclear = () => {}, onCle
     const day = todayIn(config.timezone, new Date(note.at));
     const named = (dates) => service.mentionedDates(note.body, dates);
     if (p.kind === 'done') {
-      // Cleanings that could be the one she just finished: in the last 3 weeks, not billed yet.
-      let cands = db.prepare(`SELECT * FROM cleanings WHERE status IN ('approved','completed') AND amount_cents IS NULL AND date <= ? AND date >= ? ORDER BY date DESC`)
-        .all(day, addDays(day, -21));
-      const byName = named(cands.map(c => c.date));
-      if (byName.length) cands = cands.filter(c => byName.includes(c.date));
-      else if (cands.some(c => c.date === day)) cands = cands.filter(c => c.date === day);
+      // Cleanings that could be the one she just finished: not billed yet, in the last 3 weeks.
+      // A date she names wins, even a coming one (a cleaning done early, or a test).
+      const pool = db.prepare(`SELECT * FROM cleanings WHERE status IN ('approved','completed') AND amount_cents IS NULL AND date <= ? AND date >= ? ORDER BY date DESC`)
+        .all(addDays(day, 14), addDays(day, -21));
+      const byName = named(pool.map(c => c.date));
+      let cands = byName.length ? pool.filter(c => byName.includes(c.date)) : pool.filter(c => c.date <= day);
+      if (!byName.length && cands.some(c => c.date === day)) cands = cands.filter(c => c.date === day);
       if (cands.length === 1) return { applied: applyDone(cands[0].id, p.amount, note.author, p.done), kind: 'done' };
       return { pending: queue(note, 'done', p.amount, null), kind: 'done' };
     }
@@ -120,7 +121,7 @@ export function createTextPay({ db, config, service, onUnclear = () => {}, onCle
     const day = todayIn(config.timezone, new Date(m.at));
     const rows = m.kind === 'paid'
       ? db.prepare(`SELECT * FROM cleanings WHERE ${live} AND date <= ? AND (status = 'completed' OR (status = 'approved' AND date >= ?)) ORDER BY date DESC LIMIT 8`).all(day, addDays(day, -60))
-      : db.prepare(`SELECT * FROM cleanings WHERE ${live} AND status != 'paid' AND date <= ? AND date >= ? ORDER BY date DESC LIMIT 8`).all(day, addDays(day, -45));
+      : db.prepare(`SELECT * FROM cleanings WHERE ${live} AND status != 'paid' AND date <= ? AND date >= ? ORDER BY date DESC LIMIT 8`).all(addDays(day, 14), addDays(day, -45));
     return rows;
   }
 
