@@ -70,7 +70,7 @@ Anything can be re-filed by hand, and texts from another thread can be pasted in
 No Twilio needed. Set `GROUP_MODE=phone` in Render and make sure APPROVERS and CLEANER have everyone's numbers.
 
 - **Sending:** approving a cleaning, then tapping "Share to the group", opens the phone's Share menu with the text. Pick your group (named groups are listed there under Messages) and tap Send. It goes into your existing group thread from your own number. A link can't open a named (RCS) group, which is why this uses the Share menu. Every group text already needs your OK, so that tap is the OK.
-- **Reading:** an automation app on Mark's phone (MacroDroid, free) forwards each group-text notification to `/phone/inbound?key=...`. The exact address and step-by-step setup are on the More tab. Forwarded texts become notes, supply notes become to-dos, and the cleaner's "yes" confirms the cleaning.
+- **Reading:** an automation app on Mark's phone (MacroDroid, free) forwards each group-text notification to `/phone/inbound?key=...`. The exact address and step-by-step setup are on the More tab. Forwarded texts become notes, supply notes become to-dos, and the cleaner's "yes" confirms the cleaning. If she says she can't make it and offers another day ("can't do the 4th, how about the 5th?"), the cleaning moves there and counts as confirmed, as long as that day is after the previous guests check out and no later than the next guests' check-in. If it doesn't fit, it stays put and you get a notification saying why. Nothing is texted to the group either way.
 - Switch back to Twilio any time by setting `GROUP_MODE` to `individual` or `conversation`.
 
 ### Payments and photos from the group text
