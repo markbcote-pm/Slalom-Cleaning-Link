@@ -55,9 +55,21 @@ export function parseNotification(config, { title = '', text = '', from = '' }) 
 // text can be forwarded twice. Skip a repeat of the same words from the same person.
 export function createPhoneInbox({ db, config, notes, service, onNote = () => {} }) {
   const recent = new Map();
+  // When a second text arrives before the first notification is cleared, the phone updates
+  // that notification and it can carry several lines ("yes I can do that one\nAll done! $10").
+  // Each line is handled on its own, and lines already saved are skipped as repeats.
   function receive(fields) {
+    const lines = String(fields.text || '').split(/\r?\n/).map(l => l.trim())
+      .filter(l => l && !/^\d+\s+(new\s+)?messages?$/i.test(l));
+    remember(fields, parseNotification(config, { ...fields, text: lines[lines.length - 1] || fields.text }));
+    if (lines.length <= 1) return receiveOne({ ...fields, text: lines[0] || '' });
+    const results = lines.map(text => receiveOne({ ...fields, text }));
+    const saved = results.filter(r => r.saved);
+    return { ...(saved[saved.length - 1] || results[results.length - 1]), lines: results.length, savedLines: saved.length };
+  }
+
+  function receiveOne(fields) {
     const n = parseNotification(config, fields);
-    remember(fields, n);
     if (!n || !n.body) return { saved: false, reason: 'empty' };
     const key = `${n.author}|${n.body}`.toLowerCase();
     const now = Date.now();

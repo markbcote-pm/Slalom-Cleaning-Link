@@ -1250,3 +1250,19 @@ test('Delete a hand-added cleaning completely; Airbnb cleanings cannot be delete
     assert.ok(app.service.get(air));
   } finally { app.server.close(); app.stop?.(); }
 });
+
+test('Phone inbox: a notification carrying several lines saves each new line once', async () => {
+  const config = loadConfig({ DOTENV: '0', DB_FILE: ':memory:', DRY_RUN: '1', ADMIN_PASSWORD: 'pw', FEED_TOKEN: 'feedtok',
+    APPROVERS: 'Mark:+15550000001', CLEANER: 'Jen:+15550000003', GROUP_MODE: 'phone', PHONE_ALIASES: 'Jen=MC iPhone', BASE_URL: 'http://test', TIMEZONE: 'America/Los_Angeles' });
+  const app = createApp(config);
+  try {
+    let r = app.phoneInbox.receive({ title: 'MC iPhone', text: 'yes I can do that one' });
+    assert.equal(r.author, 'Jen');
+    // The second text updates the same notification, which now holds both lines.
+    r = app.phoneInbox.receive({ title: 'MC iPhone', text: 'yes I can do that one\nAll done! $10' });
+    assert.equal(r.savedLines, 1);
+    assert.deepEqual(app.db.prepare('SELECT body FROM notes ORDER BY id').all().map(n => n.body), ['yes I can do that one', 'All done! $10']);
+    r = app.phoneInbox.receive({ title: 'MC iPhone', text: '2 new messages' });
+    assert.equal(r.saved, false);
+  } finally { app.stop?.(); }
+});
