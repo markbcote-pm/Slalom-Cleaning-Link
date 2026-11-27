@@ -1266,3 +1266,24 @@ test('Phone inbox: a notification carrying several lines saves each new line onc
     assert.equal(r.saved, false);
   } finally { app.stop?.(); }
 });
+
+test('A group text shared into the app by hand is handled like a forwarded one', async () => {
+  const config = loadConfig({ DOTENV: '0', DB_FILE: ':memory:', DRY_RUN: '1', ADMIN_PASSWORD: 'pw', FEED_TOKEN: 'feedtok',
+    APPROVERS: 'Mark:+15550000001', CLEANER: 'Jen:+15550000003', GROUP_MODE: 'phone', BASE_URL: 'http://test', TIMEZONE: 'America/Los_Angeles' });
+  const app = createApp(config);
+  await new Promise(r => app.server.listen(0, r));
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const auth = { Authorization: 'Basic ' + Buffer.from('x:pw').toString('base64') };
+  try {
+    const fd = new FormData(); fd.append('text', 'All done! $120');
+    const r = await fetch(base + '/share-photos', { method: 'POST', body: fd, redirect: 'manual' });
+    assert.match(r.headers.get('location'), /^\/share-text\?text=All%20done/);
+    const page = await (await fetch(base + r.headers.get('location'), { headers: auth })).text();
+    assert.match(page, /value="Jen" checked/);
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    const id = Number(app.db.prepare(`INSERT INTO cleanings (source, date, status, created_at, updated_at) VALUES ('manual', ?, 'approved', 'x', 'x')`).run(today).lastInsertRowid);
+    await fetch(base + '/share-text', { method: 'POST', headers: auth, body: new URLSearchParams({ body: 'All done! $120', author: 'Jen' }), redirect: 'manual' });
+    assert.equal(app.service.get(id).amount_cents, 12000);
+    assert.equal(app.db.prepare('SELECT author FROM notes').get().author, 'Jen');
+  } finally { app.server.close(); app.stop?.(); }
+});

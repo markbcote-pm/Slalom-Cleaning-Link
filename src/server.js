@@ -9,7 +9,7 @@ import { createService } from './service.js';
 import { syncAirbnb } from './sync.js';
 import { cleaningFeed } from './feed.js';
 import { isDate, todayIn, prettyDate, localToUtc } from './dates.js';
-import { layout, messagePage, approvalPage, groupDecisionPage, dashboard, notesPage, todosPage, cleaningPage, inboxPage, staysPage, paymentsCsv, morePage, loginPage, shareInPage, guestPhotosPage } from './views.js';
+import { layout, messagePage, approvalPage, groupDecisionPage, dashboard, notesPage, todosPage, cleaningPage, inboxPage, staysPage, paymentsCsv, morePage, loginPage, shareInPage, shareTextPage, guestPhotosPage } from './views.js';
 import { createNotes, validTwilioSignature } from './notes.js';
 import { createPush, SERVICE_WORKER } from './push.js';
 import { createFinance, financeRoutes, readForm, sniff } from './finance.js';
@@ -282,6 +282,9 @@ export function createApp(config, deps = {}) {
       let form;
       try { form = await readForm(req); } catch (e) { return send(res, 413, messagePage('Too big', 'That was more than the app can take at once. Try fewer photos.')); }
       const t = photos.hold(form.files);
+      // A text message shared in (one the phone didn't forward, e.g. the chat was open on screen).
+      const sharedText = [form.get('text'), form.get('title')].find(x => x && x.trim());
+      if (!t && sharedText) return redirect(res, `/share-text?text=${encodeURIComponent(sharedText.trim().slice(0, 2000))}`);
       if (!t) return send(res, 400, messagePage('No photos', 'Nothing in that share was a photo the app can keep (JPEG, PNG, WebP or HEIC).'));
       return redirect(res, `/share-photos/${t}`);
     }
@@ -401,6 +404,17 @@ export function createApp(config, deps = {}) {
       try { form = await readForm(req); } catch { return send(res, 413, 'Too many photos at once. Try fewer.', 'text/plain'); }
       photos.add(id, form.files, who || 'Owner');
       return redirect(res, `/cleanings/${id}#photos`);
+    }
+    // Save a group text that was shared in by hand, as if the phone had forwarded it.
+    if (p === '/share-text') {
+      if (req.method === 'GET') return send(res, 200, shareTextPage({ config, db, who, text: url.searchParams.get('text') || '' }));
+      const body = await readBody(req);
+      const person = config.groupMembers.find(x => x.name === body.get('author'));
+      const r = person ? phoneInbox.ingest({ body: body.get('body'), author: person.name, phone: person.phone }) : { saved: false };
+      const msg = r.reason === 'duplicate' ? 'That text was already saved.' : !r.saved ? 'Nothing saved.' : r.confirmed?.length ? `Saved, and ${person.name} confirmed ${r.confirmed.join(', ')}.`
+        : r.payment === 'done' && r.matched ? 'Saved, and the cleaning was marked cleaned.' : r.payment === 'paid' && r.matched ? 'Saved, and marked paid.'
+        : r.unclear ? 'Saved. The app will ask which cleaning it was about.' : 'Saved to Notes.';
+      return redirect(res, '/?flash=' + encodeURIComponent(msg));
     }
     m = p.match(/^\/text-matches\/(\d+)$/);
     if (m && req.method === 'POST') {

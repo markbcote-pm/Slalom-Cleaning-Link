@@ -69,7 +69,13 @@ export function createPhoneInbox({ db, config, notes, service, onNote = () => {}
   }
 
   function receiveOne(fields) {
-    const n = parseNotification(config, fields);
+    return ingest(parseNotification(config, fields));
+  }
+
+  // Save one text from the group and act on it (confirm on "yes", payments). Also used for
+  // a text shared into the app by hand, with the sender picked on the page.
+  function ingest(n) {
+    if (n && n.body) n.body = String(n.body).trim();
     if (!n || !n.body) return { saved: false, reason: 'empty' };
     const key = `${n.author}|${n.body}`.toLowerCase();
     const now = Date.now();
@@ -91,7 +97,7 @@ export function createPhoneInbox({ db, config, notes, service, onNote = () => {}
   function lastReceived() {
     try { return JSON.parse(db.prepare('SELECT value FROM meta WHERE key = ?').get('phone:last')?.value || '[]'); } catch { return []; }
   }
-  return { receive, lastReceived };
+  return { receive, ingest, lastReceived };
 }
 
 // Pull title/text/from out of whatever the automation app sent (form, JSON or query string).

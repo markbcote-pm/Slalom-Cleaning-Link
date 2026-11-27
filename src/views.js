@@ -706,6 +706,18 @@ ${paid ? `<select name="method" aria-label="How it was paid">${['Venmo', 'Zelle'
 }
 
 // After sharing photos into the app: which cleaning are they from?
+// A text message shared into the app from Messages: who wrote it?
+export function shareTextPage({ config, db, who, text }) {
+  const people = config.groupMembers;
+  const guess = config.cleaner?.name || people[0]?.name;
+  return layout('Save a group text', `${header({ config, db, who, active: 'notes' })}
+<div class="card"><h2>Save a text from the group</h2>
+<form method="post" action="/share-text"><textarea name="body" style="min-height:90px" aria-label="Message">${h(text)}</textarea>
+<p>Who sent it?</p>${people.map(p => `<label class="pick"><input type="radio" name="author" value="${h(p.name)}" ${p.name === guess ? 'checked' : ''}><span><b>${h(p.name)}</b></span></label>`).join('')}
+<div class="dialog-actions"><button>Save</button><a class="btn ghost" href="/notes">Cancel</a></div></form>
+<p class="muted">It's handled like a forwarded text: saved to Notes, a "yes" from ${h(config.cleaner?.name || 'the cleaner')} confirms the cleaning, and "done, $X" or "paid" updates payments.</p></div>`);
+}
+
 export function shareInPage({ config, db, who, token, count, likely, cleanings }) {
   const stayBefore = (date) => db.prepare("SELECT * FROM bookings WHERE status='active' AND check_out <= ? ORDER BY check_out DESC LIMIT 1").get(date);
   const thumbs = Array.from({ length: Math.min(count, 12) }, (_, i) => `<img class="thumb" src="/share-photos/${token}/${i}" alt="" loading="lazy">`).join('');
