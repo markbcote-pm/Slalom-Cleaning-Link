@@ -1,5 +1,4 @@
 import { prettyDate, prettyTime, addDays, todayIn } from './dates.js';
-import { groupSmsLink } from './phone.js';
 
 export const h = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const money = (cents) => `$${((cents || 0) / 100).toFixed(2)}`;
@@ -131,14 +130,27 @@ export function messagePage(title, text, extra = '') {
   return layout(title, `<div class="card"><h1>${h(title)}</h1><p>${h(text)}</p>${extra}</div>`);
 }
 
-// GROUP_MODE=phone: the last step of sending. Messages opens with the group and the text filled in.
+// GROUP_MODE=phone sends through the phone's Share menu, not an sms: link. A named group
+// (an RCS chat) can't be opened by a link, which only finds or makes a plain group by its
+// numbers. The Share menu lists recent conversations, named groups included, so you pick
+// yours and the text lands in it, ready to send. Without a share menu the text is copied.
+// shareText(text) resolves 'shared', 'copied' or 'cancelled'.
+const SHARE_JS = `async function shareText(text){
+  if(navigator.share){try{await navigator.share({text});return 'shared';}catch(e){if(e&&e.name==='AbortError')return 'cancelled';}}
+  try{await navigator.clipboard.writeText(text);return 'copied';}catch(e){return 'failed';}
+}`;
+
+// GROUP_MODE=phone: the last step of sending, for approvals made from a text link.
 export function phoneSendPage(gm, smsLink, { approved = false, by = '', inApp = false } = {}) {
-  return layout('Send in Messages', `<div class="card"><h1>${approved ? 'Approved. ' : ''}Last step: tap Send</h1>
-<p>Tap the button, check it's your group conversation, then tap <b>Send</b> in Messages. It goes out from your own number, into the group text.</p>
-<p><a class="btn" href="${h(smsLink)}" id="open-sms" style="font-size:1.1em">Open in Messages</a></p>
-<blockquote style="white-space:pre-wrap;border-left:3px solid #ccc;margin:0;padding:6px 12px">${h(gm.body)}</blockquote>
-<p class="muted">If Messages opens a new conversation instead of your group, the people in it don't match: check the phone numbers in Render (APPROVERS and CLEANER).${by ? ` Your own number is left out because you're ${h(by)}.` : ''}</p>
-${inApp ? '<p><a class="btn ghost" href="/">Back to the calendar</a></p>' : ''}</div>`);
+  return layout('Send to the group', `<div class="card"><h1>${approved ? 'Approved. ' : ''}Last step: send it to the group</h1>
+<p>Tap the button, pick your group in the list (in Messages), then tap <b>Send</b>. It goes out from your own number, into your group text.</p>
+<p><button type="button" id="share-group" style="font-size:1.1em">Share to the group</button> <button type="button" class="ghost" id="copy-text">Copy text</button></p>
+<blockquote id="group-text" style="white-space:pre-wrap;border-left:3px solid #ccc;margin:0;padding:6px 12px">${h(gm.body)}</blockquote>
+<p class="muted" id="share-note">If your group isn't in the list, tap Messages, then search for the group's name.</p>
+${inApp ? '<p><a class="btn ghost" href="/">Back to the calendar</a></p>' : ''}</div>
+<script>{${SHARE_JS}const t=document.getElementById('group-text').textContent,n=document.getElementById('share-note');
+document.getElementById('share-group').addEventListener('click',async()=>{const r=await shareText(t);n.textContent=r==='shared'?'Sent to Messages. Tap Send there if you haven\\'t yet.':r==='copied'?'Copied. Open your group in Messages and paste it.':r==='cancelled'?'Not shared.':'Could not share. Copy the text above by hand.';});
+document.getElementById('copy-text').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(t);n.textContent='Copied. Open your group in Messages and paste it.';}catch(e){n.textContent='Press and hold the text above to copy it.';}});}</script>`);
 }
 
 export function loginPage({ next = '/', error = '', remember = true } = {}) {
@@ -629,16 +641,17 @@ ${staying ? `<p class="warn">Heads up: guests are staying at the house on ${h(pr
 ${note ? `<div class="flash">${h(note)}</div>` : ''}
 <textarea name="body" style="min-height:110px" aria-label="Message">${h(m.body)}</textarea>
 <label class="muted" style="display:block;margin-top:8px">Deciding as <select name="by">${opts}</select></label>
-<div class="dialog-actions"><button name="send" value="1" id="msg-send">${phoneMode ? 'Open in Messages to send' : 'Send to group'}</button>
+<div class="dialog-actions"><button name="send" value="1" id="msg-send">${phoneMode ? 'Share to the group' : 'Send to group'}</button>
 ${phoneMode ? '' : '<button class="ghost" name="send" value="test">Send me a test</button>'}
 <button class="ghost" name="send" value="0">Don't send</button>
 <button class="ghost" type="button" id="msg-later">Decide later</button></div>
-<p class="muted" style="margin-bottom:0">${phoneMode ? 'Messages opens with your group and this text filled in; tap Send there.' : '"Send me a test" texts it only to the person picked above.'} "Decide later" keeps the text waiting under Waiting on you.</p></form></dialog>
+<p class="muted" style="margin-bottom:0">${phoneMode ? 'Your Share menu opens: pick your group (in Messages), then tap Send there.' : '"Send me a test" texts it only to the person picked above.'} "Decide later" keeps the text waiting under Waiting on you.</p></form></dialog>
 <script>{const d=document.getElementById('msg-dialog');${phoneMode ? `
-const links=${JSON.stringify(Object.fromEntries(config.approvers.map(a => [a.name, groupSmsLink(config, a.name)]))).replace(/</g, '\\u003c')};
-document.getElementById('msg-send').addEventListener('click',(e)=>{e.preventDefault();const f=d.querySelector('form');const b=new URLSearchParams(new FormData(f));b.set('send','1');b.set('js','1');
-const base=links[b.get('by')]||Object.values(links)[0];fetch(f.action,{method:'POST',body:b,credentials:'same-origin',keepalive:true}).catch(()=>{});
-location.href=base+'?body='+encodeURIComponent(b.get('body')||'');setTimeout(()=>location.replace('/?flash='+encodeURIComponent('Opened in Messages. Tap Send there to text the group.')),1500);});` : ''}const clean=()=>{const u=new URL(location.href);u.searchParams.delete('msg');u.searchParams.delete('msgnote');history.replaceState(null,'',u)};
+${SHARE_JS}
+document.getElementById('msg-send').addEventListener('click',async(e)=>{e.preventDefault();const f=d.querySelector('form');const b=new URLSearchParams(new FormData(f));b.set('send','1');b.set('js','1');
+const r=await shareText(b.get('body')||'');if(r==='cancelled'||r==='failed')return;
+try{await fetch(f.action,{method:'POST',body:b,credentials:'same-origin'});}catch(err){}
+location.replace('/?flash='+encodeURIComponent(r==='shared'?'Handed to Messages. Make sure you tapped Send in your group.':'Copied. Open your group in Messages, paste it and send.'));});` : ''}const clean=()=>{const u=new URL(location.href);u.searchParams.delete('msg');u.searchParams.delete('msgnote');history.replaceState(null,'',u)};
 document.getElementById('msg-later').addEventListener('click',()=>d.close());d.addEventListener('close',clean);d.showModal();}</script>`;
 }
 
@@ -801,14 +814,14 @@ ${owed.length ? `<h2 style="margin-top:14px">Requested, not paid yet</h2><form m
 // GROUP_MODE=phone setup: the test link and how to forward group texts from the phone.
 function phoneCard(config, who, phoneInbox) {
   if (config.groupMode !== 'phone') return '';
-  const me = config.approvers.find(a => a.name === who) || config.approvers[0];
   const inbound = `${config.baseUrl}/phone/inbound?key=${config.phone.key}`;
   const members = config.groupMembers.filter(p => p.phone);
   const last = phoneInbox?.lastReceived() || [];
   return `<div class="card" id="group-phone"><h2>Group text (through your phone)</h2>
-<p>Group texts go through your own group conversation with ${h(members.map(p => p.name).join(', '))}. When you approve one, Messages opens with the group and the words filled in, and you tap Send.</p>
-${config.cleaner && !config.cleaner.phone ? `<p class="warn">${h(config.cleaner.name)} has no phone number in CLEANER yet, so Messages would open a conversation without her. Add it in Render when you're ready.</p>` : ''}
-<p class="row"><a class="btn ghost" href="${h(groupSmsLink(config, me?.name))}">Check: open our group in Messages</a><span class="muted">Opens the conversation with nothing typed. It should be your existing group thread.</span></p>
+<p>Group texts go through your own group conversation with ${h(members.map(p => p.name).join(', '))}. When you approve one, tap <b>Share to the group</b>: your phone's Share menu opens, you pick your group (it's listed by its name, under Messages), and tap Send.</p>
+<p class="row"><button type="button" class="ghost" id="share-test">Try it: share a test</button><span class="muted" id="share-test-note">Opens the Share menu with "Test from Cleaning Link". Pick your group to see it typed in, then delete it instead of sending.</span></p>
+<p class="muted">Tip: if your group doesn't show up in the Share menu, send a message in it once so it's recent, or long-press it in the Share menu and pin it.</p>
+<script>{${SHARE_JS}document.getElementById('share-test').addEventListener('click',async()=>{const r=await shareText('Test from Cleaning Link');document.getElementById('share-test-note').textContent=r==='shared'?'Shared. Delete the test text in Messages instead of sending it.':r==='copied'?"This browser has no Share menu, so the text was copied instead.":'Not shared.';});}</script>
 <h2 style="margin-top:14px">Reading the group text</h2>
 <p>To save the group's texts as notes (and confirm a cleaning when ${h(config.cleaner?.name || 'the cleaner')} says yes), Mark's phone forwards each new message from the group here:</p>
 <p><code style="word-break:break-all">${h(config.phone.key ? inbound : 'Set FEED_TOKEN or PHONE_KEY in Render first')}</code></p>

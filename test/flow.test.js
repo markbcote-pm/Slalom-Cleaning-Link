@@ -1117,8 +1117,9 @@ test('GROUP_MODE=phone: approving opens Messages with the group; forwarded notif
     const r = await fetch(`${base}/a/${c.approval_token}`, { method: 'POST', body: new URLSearchParams({ by: 'Danielle' }), redirect: 'manual' });
     assert.equal(r.status, 303);
     const page = await (await fetch(base + r.headers.get('location'))).text();
-    assert.match(page, /Last step: tap Send/);
-    assert.match(page, /href="sms:\+15550000001,\+15550000003\?body=New%20cleaning/);
+    assert.match(page, /Last step: send it to the group/);
+    assert.match(page, /Share to the group/);
+    assert.match(page, /New cleaning request/);
     assert.equal(app.db.prepare("SELECT status FROM outbox WHERE channel='group'").get().status, 'on phone');
 
     // Wrong key is refused.

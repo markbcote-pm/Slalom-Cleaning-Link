@@ -65,7 +65,7 @@ Anything can be re-filed by hand, and texts from another thread can be pasted in
 
 No Twilio needed. Set `GROUP_MODE=phone` in Render and make sure APPROVERS and CLEANER have everyone's numbers.
 
-- **Sending:** approving a cleaning (or tapping "Open in Messages to send") opens the phone's Messages app with the group's numbers and the text filled in. Tap Send and it goes into your existing group thread from your own number. Every group text already needs your OK, so that tap is the OK.
+- **Sending:** approving a cleaning, then tapping "Share to the group", opens the phone's Share menu with the text. Pick your group (named groups are listed there under Messages) and tap Send. It goes into your existing group thread from your own number. A link can't open a named (RCS) group, which is why this uses the Share menu. Every group text already needs your OK, so that tap is the OK.
 - **Reading:** an automation app on Mark's phone (MacroDroid, free) forwards each group-text notification to `/phone/inbound?key=...`. The exact address and step-by-step setup are on the More tab. Forwarded texts become notes, supply notes become to-dos, and the cleaner's "yes" confirms the cleaning.
 - Switch back to Twilio any time by setting `GROUP_MODE` to `individual` or `conversation`.
 
