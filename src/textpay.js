@@ -24,7 +24,7 @@ export function methodIn(text) {
 
 // What kind of payment text this is, if any.
 export function classifyPaymentText(text, { fromCleaner, fromOwner }) {
-  const t = String(text || '').toLowerCase();
+  const t = String(text || '').replace(/[\u2018\u2019\u02BC\u2032`´]/g, "'").toLowerCase();
   if (!t.trim()) return null;
   if (fromCleaner) {
     const done = /\b(all done|done|finished|all set|complete(?:d)?|wrapped up|all clean(?:ed)?|just left|leaving now|house is ready|place is ready|ready for (?:the )?(?:next|guests))\b/.test(t)
