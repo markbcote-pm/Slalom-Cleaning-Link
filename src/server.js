@@ -511,6 +511,14 @@ export function createApp(config, deps = {}) {
       const back = body.get('back') === 'inbox' ? '/inbox' : `/cleanings/${m[1]}`;
       return redirect(res, r.error ? `/cleanings/${m[1]}` : back);
     }
+    m = p.match(/^\/cleanings\/(\d+)\/delete$/);
+    if (m) {
+      const id = Number(m[1]);
+      for (const ph of photos.list(id)) photos.remove(ph.id);
+      const r = service.remove(id);
+      if (r.error) return redirect(res, `/cleanings/${id}`);
+      return redirect(res, `/?month=${r.deleted.date.slice(0, 7)}&flash=${encodeURIComponent(`Deleted the ${prettyDate(r.deleted.date)} cleaning.`)}`);
+    }
     m = p.match(/^\/cleanings\/(\d+)\/restore$/);
     if (m) {
       const r = service.restoreDeclined(Number(m[1]), who);

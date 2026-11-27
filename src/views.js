@@ -546,6 +546,8 @@ ${groupMsgs.length ? `<div class="card"><h2>Group texts</h2><table>${groupMsgs.m
 <td>${g.status === 'skipped' && g.id === latestId ? `<form method="post" action="/g/${g.token}"><input type="hidden" name="by" value="${h(who)}"><button class="ghost" name="send" value="undo">Undo</button></form>`
   : g.status === 'sent' && g.id === latestId && config.groupMode === 'phone' ? `<form method="post" action="/g/${g.token}"><input type="hidden" name="by" value="${h(who)}"><button class="ghost" name="send" value="unsend" title="Puts it back under Waiting on you so you can share it from your phone">Didn't go out? Send again</button></form>`
   : g.status === 'pending' ? `<a class="btn ghost" href="/?month=${c.date.slice(0, 7)}&msg=${g.token}">Decide</a>` : ''}</td></tr>`).join('')}</table></div>` : ''}
+${c.source === 'manual' ? `<div class="card"><h2>Delete this cleaning</h2><p class="muted">For mistakes and tests. It's removed completely: nothing is texted, and it leaves the calendar and payment records.${c.group_known_date ? ' The group was told about it, so if it was real, use Cancel on Waiting on you instead, which asks whether to tell them.' : ''}</p>
+<form method="post" action="/cleanings/${c.id}/delete" onsubmit="return confirm('Delete the ${h(prettyDate(c.date))} cleaning completely? Nothing is texted. This can\\'t be undone.')"><button class="danger">Delete cleaning</button></form></div>` : ''}
 ${c.status === 'declined' ? `<div class="card"><p>This cleaning was marked not needed.</p><form method="post" action="/cleanings/${c.id}/restore"><button class="ghost">Undo, put it back for approval</button></form></div>` : ''}
 <div class="card"><h2>History</h2><table>${events.map(e => `<tr><td class="muted" style="white-space:nowrap">${h(when(e.at, config.timezone))}</td><td><b>${h(e.stage)}</b> ${h(e.detail || '')}</td></tr>`).join('')}</table></div>`);
 }
@@ -729,6 +731,7 @@ export function inboxPage({ config, service, db, who }) {
 <td><div class="stages">${service.stageOf(c).map(s => `<span class="stage ${s.done ? 'done' : ''}">${h(s.name)}</span>`).join('')}</div></td>
 <td><form method="post" action="/cleanings/${c.id}/move" class="row"><input type="date" name="date" value="${c.date}" required><button class="ghost">Move</button></form>
 <div class="row" style="margin-top:6px"><form method="post" action="/cleanings/${c.id}/cancel" onsubmit="return confirm('Cancel this cleaning?')"><button class="danger">Cancel</button></form>
+${c.source === 'manual' ? `<form method="post" action="/cleanings/${c.id}/delete" onsubmit="return confirm('Delete this cleaning completely? Nothing is texted.')"><button class="ghost">Delete</button></form>` : ''}
 <form method="post" action="/cleanings/${c.id}/message"><input type="hidden" name="body" value=""><button class="ghost">Text group</button></form></div></td></tr>`).join('');
   const cleared = clearedList({ db, today, who });
   return layout('Waiting on you', `${header({ config, db, who, active: 'inbox' })}
