@@ -26,6 +26,10 @@ No dependencies: Node.js 22.13 or newer only. Data lives in one SQLite file (`da
    between stays, and same-day turnovers in red. Airbnb's link has no guest names, so you can type them in.
    Every message sent is listed at the bottom of the dashboard.
 
+## Live screens
+
+Open screens refresh on their own within a few seconds when something changes: a forwarded text confirms a cleaning, a payment comes in, Airbnb adds a stay, or the other person approves something. If you're typing or a dialog is open, a small "Something changed. Refresh" bar appears instead, so nothing you're entering is lost. The Airbnb check finding nothing new doesn't cause a refresh.
+
 ## Notes and to-dos
 
 Texts from the group are saved as notes, each with its time and sender, and tied to the cleaning it's about

@@ -1,4 +1,5 @@
 import { prettyDate, prettyTime, addDays, todayIn } from './dates.js';
+import { liveStamp, LIVE_JS } from './live.js';
 
 export const h = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const money = (cents) => `$${((cents || 0) / 100).toFixed(2)}`;
@@ -117,7 +118,8 @@ dialog{border:1px solid var(--line);border-radius:12px;background:var(--card);co
 .upload{margin:10px 0}.upload .btn{font-size:14px}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.form-grid label{display:flex;flex-direction:column;gap:3px}.form-grid .wide{grid-column:1/-1}.form-grid input,.form-grid select{width:100%}
 @media (max-width:480px){.form-grid{grid-template-columns:1fr}}
 .tag.none{background:var(--w-missing);color:var(--w-missing-ink)}.h3{font-size:15px;margin:16px 0 6px}
-@media print{.tabs,.topbar,.noprint{display:none!important}.card{border:0;padding:0}body{background:#fff;color:#000}}
+@media print{.live-bar,.tabs,.topbar,.noprint{display:none!important}.card{border:0;padding:0}body{background:#fff;color:#000}}
+.live-bar{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);background:var(--ink);color:var(--bg,#fff);padding:8px 10px 8px 14px;border-radius:999px;box-shadow:0 4px 16px rgba(0,0,0,.2);display:flex;gap:10px;align-items:center;z-index:50;font-size:14px;max-width:calc(100% - 32px)}.live-bar button{padding:4px 12px}
 `;
 
 export function layout(title, body) {
@@ -391,7 +393,7 @@ export function header({ config, db, who, active }) {
   const tab = (key, href, label) => `<a class="tab ${active === key ? 'on' : ''}" href="${href}">${label}</a>`;
   return `<div class="topbar"><div><h1 class="brand"><img src="/icon.svg" alt="" width="28" height="28">Cleaning Link</h1>${config.dryRun ? '<a class="test-badge" href="/more#texting">Test mode</a>' : config.smsOnlyTo?.length ? '<a class="test-badge" href="/more#texting">Texts: safety switch on</a>' : ''}</div>
 <form method="post" action="/who" class="row"><label class="muted hide-sm">You are</label><select name="name" onchange="this.form.submit()" aria-label="You are">${whoSel}</select></form></div>
-<nav class="tabs">${tab('calendar', '/', 'Calendar')}${tab('inbox', '/inbox', `Waiting on you${badge(waiting)}`)}${tab('stays', '/stays', 'Stays')}${tab('todos', '/todos', `To-do${badge(openTodos)}`)}${tab('notes', '/notes', 'Notes')}${tab('payments', '/payments', 'Payments')}${tab('more', '/more', 'More')}</nav>`;
+${LIVE_JS(liveStamp(db))}<nav class="tabs">${tab('calendar', '/', 'Calendar')}${tab('inbox', '/inbox', `Waiting on you${badge(waiting)}`)}${tab('stays', '/stays', 'Stays')}${tab('todos', '/todos', `To-do${badge(openTodos)}`)}${tab('notes', '/notes', 'Notes')}${tab('payments', '/payments', 'Payments')}${tab('more', '/more', 'More')}</nav>`;
 }
 
 const TAG_LABEL = { supplies: 'Supplies', condition: 'Condition / damage' };
