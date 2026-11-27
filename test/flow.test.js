@@ -1524,3 +1524,30 @@ test('Jen\'s real group texts: only the cleaning ones do anything', async () => 
   }
   assert.deepEqual(wrong, []);
 });
+
+test('a proposed cleaning can be approved from its own page, as well as from Waiting on you', async () => {
+  const { app, sync } = setup();
+  await sync([['s1', '2026-12-05', '2026-12-08'], ['s2', '2026-12-12', '2026-12-14']]);
+  await new Promise(r => app.server.listen(0, r));
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const auth = { Authorization: 'Basic ' + Buffer.from('x:pw').toString('base64') };
+  try {
+    const [a, b] = app.db.prepare("SELECT * FROM cleanings WHERE status='awaiting_approval' ORDER BY date").all();
+    const page = await (await fetch(`${base}/cleanings/${a.id}`, { headers: auth })).text();
+    assert.match(page, /Approve this cleaning/);
+    assert.match(page, /data-open="approve-dialog"/);
+    // Already arranged: approved and confirmed, back on the same page, nothing texted.
+    let r = await fetch(`${base}/cleanings`, { method: 'POST', headers: auth, redirect: 'manual',
+      body: new URLSearchParams({ proposal: String(a.id), back: 'cleaning', arranged: '1', note: 'oven too' }) });
+    assert.equal(r.status, 303);
+    assert.match(r.headers.get('location'), new RegExp(`^/cleanings/${a.id}\\?flash=`));
+    assert.equal(app.service.get(a.id).status, 'approved');
+    assert.ok(app.service.get(a.id).cleaner_confirmed_at);
+    assert.doesNotMatch(await (await fetch(`${base}${r.headers.get('location')}`, { headers: auth })).text(), /Approve this cleaning/);
+    // Text the group: approved, and the drafted group text opens for a decision.
+    r = await fetch(`${base}/cleanings`, { method: 'POST', headers: auth, redirect: 'manual',
+      body: new URLSearchParams({ proposal: String(b.id), back: 'cleaning', arranged: '0' }) });
+    assert.equal(app.service.get(b.id).status, 'approved');
+    assert.match(r.headers.get('location'), /msg=/);
+  } finally { app.server.close(); }
+});

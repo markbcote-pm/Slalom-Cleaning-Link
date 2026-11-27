@@ -446,7 +446,7 @@ export function createApp(config, deps = {}) {
     if (req.method === 'GET' && p === '/todos') return send(res, 200, todosPage({ config, db, who }));
     m = p.match(/^\/cleanings\/(\d+)$/);
     if (req.method === 'GET' && m) {
-      const page = cleaningPage({ config, db, who, service, id: Number(m[1]), receipts: fin.receiptsForCleaning(Number(m[1])), photos: photos.list(Number(m[1])), photosLink: `${config.baseUrl}/p/${photos.shareToken(Number(m[1]))}` });
+      const page = cleaningPage({ config, db, who, service, id: Number(m[1]), receipts: fin.receiptsForCleaning(Number(m[1])), photos: photos.list(Number(m[1])), photosLink: `${config.baseUrl}/p/${photos.shareToken(Number(m[1]))}`, flash: url.searchParams.get('flash') });
       return page ? send(res, 200, page) : send(res, 404, 'Not found', 'text/plain');
     }
     if (req.method !== 'POST') return send(res, 404, 'Not found', 'text/plain');
@@ -476,7 +476,7 @@ export function createApp(config, deps = {}) {
     if (p === '/cleanings' && body.get('proposal')) {
       const c = service.get(Number(body.get('proposal')));
       if (!c) return redirect(res, '/?flash=' + encodeURIComponent('That cleaning no longer exists.'));
-      const back = (msg) => redirect(res, `/?month=${c.date.slice(0, 7)}&flash=${encodeURIComponent(msg)}`);
+      const back = (msg) => redirect(res, body.get('back') === 'cleaning' ? `/cleanings/${c.id}?flash=${encodeURIComponent(msg)}` : `/?month=${c.date.slice(0, 7)}&flash=${encodeURIComponent(msg)}`);
       if (c.status !== 'awaiting_approval') return back(`The ${prettyDate(c.date)} cleaning was already ${c.status === 'declined' ? 'declined' : 'approved'}.`);
       if (body.get('action') === 'decline') {
         await service.decline(c.approval_token, who);
