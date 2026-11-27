@@ -828,7 +828,8 @@ function phoneCard(config, who, phoneInbox) {
 <details><summary>Set it up in MacroDroid (free, about 5 minutes)</summary><ol>
 <li>Install <b>MacroDroid</b> from the Play Store and allow it to read notifications.</li>
 <li>Add macro. Trigger: <b>Notification &gt; Notification received</b>, app <b>Messages</b>, text "contains" the group's name as it shows in your notifications (or a member's name).</li>
-<li>Action: <b>Web interactions &gt; HTTP request</b>, method <b>POST</b>, the address above, body type form, with fields <code>title</code> = <code>[notification_title]</code> and <code>text</code> = <code>[notification]</code>.</li>
+<li>Action: <b>Web interactions &gt; HTTP request</b>, method <b>POST</b>, the whole address above (keep the <code>?key=...</code> part). Leave the body empty and add two <b>Query params</b>: <code>title</code> and <code>text</code>. For their values, tap the <b>…</b> button and pick the notification title (it shows as <code>{not_title}</code>) and the notification text.</li>
+<li>Check it: press and hold the action, tap <b>Test action</b>, and refresh this page. A line should appear under "Last messages forwarded".</li>
 <li>Save. In Android settings, set MacroDroid's battery use to <b>Unrestricted</b> so it keeps running.</li>
 <li>Ask Danielle to text the group "test". It should show up below and on the Notes tab.</li></ol>
 <p class="muted">Messages you send yourself don't make a notification, so they aren't forwarded. A muted group doesn't either, so keep notifications on for it.</p></details>
