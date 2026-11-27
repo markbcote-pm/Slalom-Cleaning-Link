@@ -33,8 +33,15 @@ function whoIs(config, label) {
   if (!label) return null;
   if (digits(label).length === 10) return people(config).find(p => p.phone && digits(p.phone) === digits(label)) || null;
   const hits = people(config).filter(p => p.names.some(n => hasName(label, n)));
-  return hits.length === 1 ? hits[0] : null;
+  if (hits.length) return hits.length === 1 ? hits[0] : null;
+  // A short name in the app, a full one in the phone's contacts: "Jen" is "Jennifer Patterson".
+  const first = String(label).trim().split(/\s+/)[0].toLowerCase();
+  const loose = people(config).filter(p => p.names.some(n => n.length >= 3 && !n.includes(' ') && first.startsWith(n)));
+  return loose.length === 1 ? loose[0] : null;
 }
+
+// Messages' own status notifications, not texts from anyone.
+const SYSTEM_NOTICE = /^(messages is doing work in the background|checking for new messages|sending|sending\s*(?:…|\.\.\.)|downloading|message not sent|chat features? (?:are|is) (?:now )?(?:on|off|ready))\.?$/i;
 
 // Turn a forwarded notification into { author, phone, body }. Messages apps show group texts
 // either as title "Jenn Patterson" / text "yes", or title "<group name>" / text "Jenn: yes".
@@ -60,7 +67,8 @@ export function createPhoneInbox({ db, config, notes, service, onNote = () => {}
   // Each line is handled on its own, and lines already saved are skipped as repeats.
   function receive(fields) {
     const lines = String(fields.text || '').split(/\r?\n/).map(l => l.trim())
-      .filter(l => l && !/^\d+\s+(new\s+)?messages?$/i.test(l));
+      .filter(l => l && !/^\d+\s+(new\s+)?messages?$/i.test(l) && !SYSTEM_NOTICE.test(l));
+    if (!lines.length && SYSTEM_NOTICE.test(String(fields.text || '').trim())) return { saved: false, reason: 'system notice' };
     remember(fields, parseNotification(config, { ...fields, text: lines[lines.length - 1] || fields.text }));
     if (lines.length <= 1) return receiveOne({ ...fields, text: lines[0] || '' });
     const results = lines.map(text => receiveOne({ ...fields, text }));

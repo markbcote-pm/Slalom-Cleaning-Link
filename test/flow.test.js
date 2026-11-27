@@ -1430,3 +1430,97 @@ test('cleaner offers another day: words ("the third"), "yes, the 3rd", and other
   assert.deepEqual(r.confirmed.map(c => c.id), [id]);
   assert.equal(app.service.get(id).date, plus(9));
 });
+
+test('"Let’s do the 3rd" moves the cleaning waiting on her answer, even with another cleaning in the same gap', async () => {
+  const { app } = setup();
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  const plus = (n) => { const d = new Date(today + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  const book = (uid, a, b) => app.db.prepare("INSERT INTO bookings (uid, check_in, check_out, summary, status, first_seen, last_seen) VALUES (?,?,?,'Reserved','active','x','x')").run(uid, a, b);
+  const mk = (d, confirmed) => Number(app.db.prepare("INSERT INTO cleanings (source, date, status, group_known_date, cleaner_confirmed_at, created_at, updated_at) VALUES ('manual', ?, 'approved', ?, ?, 'x', 'x')").run(d, d, confirmed ? 'x' : null).lastInsertRowid);
+  // Like Mark's calendar: guests leave day 4, next arrive day 8; a confirmed cleaning on day 5, a test one asked on day 7.
+  book('john', plus(1), plus(4)); book('rishab', plus(8), plus(10));
+  const real = mk(plus(5), true), asked = mk(plus(7), false);
+  const n = +plus(6).slice(8), sfx = n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th';
+  const r = app.service.cleanerReply({ body: `Let’s do the ${n}${sfx}`, author: 'Rosa' });
+  assert.equal(r.suggestion?.moved, true, JSON.stringify(r));
+  assert.equal(app.service.get(asked).date, plus(6));
+  assert.ok(app.service.get(asked).cleaner_confirmed_at);
+  assert.equal(app.service.get(real).date, plus(5));
+  assert.equal(app.db.prepare("SELECT COUNT(*) n FROM cleanings").get().n, 2);
+  // A day named with nothing waiting on her is left alone (no surprise moves).
+  assert.equal(app.service.cleanerReply({ body: `the ${n}${sfx} was nice`, author: 'Rosa' }).suggestion, undefined);
+});
+
+test('Messages system notices are not saved as texts', async () => {
+  const { app } = setup();
+  const r = app.phoneInbox.receive({ title: 'Messages', text: 'Messages is doing work in the background' });
+  assert.equal(r.saved, false);
+  assert.equal(app.db.prepare("SELECT COUNT(*) n FROM notes").get().n, 0);
+});
+
+// Jen's real texts from the group, Nov 2 to Nov 17, as the phone forwards them (title is her
+// contact name; long texts arrive as several lines). Each one is replayed while a cleaning is
+// waiting on her answer and a finished one has no amount yet, the moment a misread would hurt most.
+test('Jen\'s real group texts: only the cleaning ones do anything', async () => {
+  const JEN = [
+    // [text, what should happen]
+    ['Both dates are confirmed', 'confirm'],
+    ['Great! 🙌', 'confirm'],
+    ["I'm here", 'nothing'],
+    ['Got it. Thanks', 'confirm'],
+    ['There are no pillows on the bunkers in the closet.\n\nShould I add Pillows or no?', 'nothing'],
+    ['👍', 'confirm'],
+    ["Okay.  If it doesn't come by the time I'm done I'm working across the street tomorrow morning at 7:30am. I'll check again.", 'nothing'],
+    ['What is the wifi here?', 'nothing'],
+    ["I bought this amazing vacuum and mopping system.  But I need the wifi and password to get it going.\n\nMy new assistant 😆\n\nIt will do the floors while I'm cleaning.", 'nothing'],
+    ["You're all set! 5.5hrs\n$275\n\n I cleaned from ceiling to floor.\n\nGarbage cans,  cabinets, refrigerator, freezer,  cabinets,  vanities, cobwebs, ceiling fans,  exhaust fans in bathrooms...\n\nNow it should be easy to turn over without deep cleaning.\n\nCan you close the garage door or do you want me to try and do it from inside?\n\nJen", 'done 275'],
+    ["You're welcome!", 'nothing'],
+    ["I'm coming to you tomorrow.  Is pinyin checking in the same day?\n\nI have PT from 10:49am to 11am.\n\nCan I Come after that?", 'nothing'],
+    ["I'm here. Looks like only one bed was used.", 'nothing'],
+    ["I'm done for today.  You are my second house.\n\nI'll be back tomorrow to finish.", 'nothing'],
+    ['😊', 'nothing'],
+    ["I'm back to finish", 'nothing'],
+    ["They didn't do any dishes,  strip bed,  or take out garbage.\n\nIs that something you tell them to start before leaving?\n\nIf not then yes 5 stars.\n\nWe usually ask that they stay a loud of towels/ linens.  Fill and start the dishwasher.  And most importantly take the trash out to the bear box.\n\nI've encountered 3 beats this year and one racoon.  Some mice. Which is usual this time of year.  But I bear can mess the inside of a house really quick.\n\nOh yeah, and make sure the flu is shut on the fireplace.\n\nThey had 2 huge birds come down the chimney last year across the street from you 😆\n\n3hrs $150\n\nJen", 'done 150'],
+    ["tomorrow.  I vacuumed the couch and strange\nSteam mopped.  I'll always do my best. And will do my best.\n\nI spent 2 days deep cleaning bathrooms.\n\nThis is the first time I've gotten a bad review.\n\nSorry.  We will make it right.  To the best of my ability.\n\nBut I was totally satisfied with the clean.\n\nI stand behind my work.\n\nHugs,\nJen", 'nothing'],
+    ['I do. And I want us all to have a great experience.', 'nothing'],
+    ["But I will always try harder.\n\nQuestion.  What do I do to maintain the sauna?\n\nThe garage could use a a good sweep .\n\nI'll be done with my clean on Christie at 2pm tomorrow.\n\nAnd I'm preparing for the storm coming in on Friday.\n\nPlease give me info on the complaint and I'll make sure it's almost good.", 'nothing'],
+    ["Thank you.  I'm at a house around the corner.  I'll go straight there as soon as I'm done.", 'nothing'],
+    ["I'm here.", 'nothing'],
+    ["I'm so sorry this is happening.\n\nThis is the fixed pics of what she took pics of.\n\nLiterally blown out of proportion and photos blown up!\n\nSure. I missed some shampoo spilled on the shower wall.  The bathroom sinks are immaculate. And I did miss one of the door frames or of the 4 of  them.\n\nI'm going to call you.", 'nothing'],
+    ['No worries', 'nothing'],
+    ['If you could call me when you get a chance,  that would be great.\n\nSorry to bother you.\n\nJen', 'nothing'],
+    ["Sure.  That's a great idea.\n\nI have PT for my knee at 10:40am at PT Revolution in the keys.\n\nI plan on going right after that.\n\nWe have a storm coming on Wed. Supposed to get 18 inches off snow at lake level and a few feet up at the top of heavenly.\n\nI'll get the cobweb tool from next door and work in the garage today.\n\nJen\n\nI'll text you when I arrive.\n\nJen", 'confirm'],
+    ["I don't see any new kitchen sponges.\n\nI just ordered 50 across the street.  I'll bring a few over until you can order some.", 'nothing'],
+    ["Okay.  Check out was good except she didn't start the laundry.\n\nEverything else was done.  I organized more cabinets in the kitchen and the linen closet again.", 'nothing'],
+    ['3hr $150', 'done 150'],
+    ['No worries.  Oh and I cleaned the garage floor but forgot to take a Pic 😆', 'nothing'],
+    ['Thanks!', 'nothing'],
+  ];
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  const plus = (n) => { const d = new Date(today + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  const wrong = [];
+  for (const [text, want] of JEN) {
+    const config = loadConfig({ DOTENV: '0', DB_FILE: ':memory:', DRY_RUN: '1', ADMIN_PASSWORD: 'pw', FEED_TOKEN: 'feedtok', GROUP_MODE: 'phone',
+      APPROVERS: 'Mark:+15550000001,Danielle:+15550000002', CLEANER: 'Jen:+15550000003', TIMEZONE: 'America/Los_Angeles' });
+    const app = createApp(config);
+    const book = (uid, a, b) => app.db.prepare("INSERT INTO bookings (uid, check_in, check_out, summary, status, first_seen, last_seen) VALUES (?,?,?,'Reserved','active','x','x')").run(uid, a, b);
+    book('past', plus(-4), plus(-1)); book('soon', plus(3), plus(6)); book('later', plus(12), plus(15));
+    const mk = (d, status) => Number(app.db.prepare("INSERT INTO cleanings (source, date, status, group_known_date, created_at, updated_at) VALUES ('manual', ?, ?, ?, 'x', 'x')").run(d, status, d).lastInsertRowid);
+    const finished = mk(plus(-1), 'approved'), asked = mk(plus(6), 'approved'), asked2 = mk(plus(15), 'approved');
+    app.phoneInbox.receive({ title: 'Jennifer Patterson', text });
+    const f = app.service.get(finished), a = app.service.get(asked), a2 = app.service.get(asked2);
+    const got = a.date !== plus(6) || a2.date !== plus(15) ? 'moved'
+      : f.status !== 'approved' ? `done${f.amount_cents ? ' ' + f.amount_cents / 100 : ''}`
+      : a.cleaner_confirmed_at || a2.cleaner_confirmed_at ? 'confirm' : 'nothing';
+    // "Both dates" confirms both asks; any other confirm needs a single ask, so it confirms neither here.
+    const expect = want === 'confirm' ? (/both/i.test(text) ? 'confirm' : 'nothing') : want;
+    if (got !== expect) wrong.push(`${JSON.stringify(text.slice(0, 60))}: got ${got}, want ${expect}`);
+    if (want === 'confirm' && !/both/i.test(text)) {
+      // With just one cleaning waiting, a short yes confirms it.
+      app.db.prepare('DELETE FROM cleanings WHERE id = ?').run(asked2);
+      app.service.cleanerReply({ body: text.split('\n')[0], author: 'Jen' });
+      if (!app.service.get(asked).cleaner_confirmed_at) wrong.push(`${JSON.stringify(text.slice(0, 60))}: one cleaning waiting, not confirmed`);
+    }
+  }
+  assert.deepEqual(wrong, []);
+});

@@ -28,7 +28,9 @@ export function classifyPaymentText(text, { fromCleaner, fromOwner }) {
   if (!t.trim()) return null;
   if (fromCleaner) {
     const done = /\b(all done|done|finished|all set|complete(?:d)?|wrapped up|all clean(?:ed)?|just left|leaving now|house is ready|place is ready|ready for (?:the )?(?:next|guests))\b/.test(t)
-      && !/\b(not done|will be done|be done by|when (?:i'?m|you'?re) done|almost done|not finished|done yet)\b/.test(t) && !/\?\s*$/.test(t);
+      && !/\b(not done|almost done|not finished|done yet|(?:will|i'?ll|gonna|going to|should|to) be (?:done|finished)|(?:done|finished) (?:for (?:today|now|the day|tonight)|with (?:my|the|a) (?:clean|job|house) (?:on|at)))\b/.test(t)
+      && !/\b(?:when|once|after|as soon as|by the time|time|until|till|before|if) (?:i'?m|i am|we'?re|you'?re|i get|i'?ve) (?:done|finished)\b/.test(t)
+      && !/\b(?:was|were|been|else) done\b/.test(t) && !/\?\s*$/.test(t);
     const amount = amountIn(text);
     const asks = amount != null && /(\$|dollars|total|owe|cost|charge|bill|invoice|venmo|zelle|pay)/.test(t);
     if (done || asks) return { kind: 'done', done, amount: asks || done ? amount : null };

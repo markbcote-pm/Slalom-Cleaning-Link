@@ -382,11 +382,17 @@ export function createService({ db, config, notifier }) {
     if (phone && c.phone && digits(phone) === digits(c.phone)) return true;
     return !!author && author.trim().toLowerCase() === c.name.trim().toLowerCase();
   }
+  // Lots of the group chat isn't about dates at all (wifi, supplies, renters, "Sure. I missed some
+  // shampoo..."), so a yes has to be short ("Yes", "Sure!", "Got it, thanks") unless it says so
+  // outright ("Both dates are confirmed", "that works for me").
   function saysYes(text) {
-    const t = String(text || '').toLowerCase().trim();
-    if (/\b(no|nope|not|can'?t|cannot|won'?t|unable|sorry|maybe|unless|wait)\b/.test(t) || t.includes('?')) return false;
-    return /^(yes|yes!|yep|yeah|yup|ya|y|sure|ok|okay|k|confirmed?|sounds good|will do|i can|can do|works|that works|got it|perfect|great|absolutely|definitely)\b/.test(t)
-      || /^(👍|✅|👌)/u.test(t) || /\b(i'?ll be there|see you then|i'?m in)\b/.test(t);
+    const t = String(text || '').toLowerCase().replace(/[‘’]/g, "'").trim();
+    const u = t.replace(/\bcan'?t wait\b/g, '');
+    if (/\b(no|nope|not|can'?t|cannot|won'?t|unable|sorry|maybe|unless|wait|\w+n't)\b/.test(u) || t.includes('?')) return false;
+    const words = t.split(/\s+/).filter(Boolean).length;
+    if (/\b(confirm(?:ed|s)?|works for me|that works|i can do (?:it|that|those|both|them)|i'?ll be there|see you then|i'?m in|count me in|both (?:dates|days) (?:are|work))\b/.test(t)) return true;
+    return (words <= 7 && /^(yes|yes!|yep|yeah|yup|ya|y|sure|ok|okay|k|sounds good|will do|i can|can do|works|got it|perfect|great|absolutely|definitely)\b/.test(t))
+      || (words <= 3 && /^(👍|✅|👌)/u.test(t));
   }
   function mentionedDates(text, dates) {
     const t = ordinalWords(String(text || '').replace(/[\u2018\u2019\u02BC]/g, "'")).toLowerCase();
@@ -430,11 +436,11 @@ export function createService({ db, config, notifier }) {
   const hooks = { suggested: () => {} };
   function offersOtherDay(text) {
     const t = String(text || '').toLowerCase();
-    return /\b(no|nope|can'?t|cannot|won'?t|unable|not available|busy|booked|instead|how about|what about|could (?:do|come|clean)|can (?:do|come|clean)|works? better|would work|rather|prefer|switch|move it)\b/.test(t)
+    return /\b(no|nope|can'?t|cannot|won'?t|unable|not available|busy|booked|instead|how about|what about|what if|could (?:do|come|clean)|can (?:do|come|clean)|can i (?:do|come)|works? better|better for me|would work|works for me|rather|prefer|switch|move it|let'?s|lets|go with|i'?ll (?:do|come)|ok(?:ay)?,? the)\b/.test(t)
       && !/\b(done|finished|all set|paid)\b/.test(t)
       && !/\b(can'?t wait|no problem|no prob|no worries|no rush)\b/.test(t);
   }
-  function cleanerSuggestion(body, { yes = false } = {}) {
+  function cleanerSuggestion(body, { yes = false, onlyWaiting = false } = {}) {
     const today = todayIn(config.timezone);
     const open = db.prepare(`SELECT * FROM cleanings WHERE status = 'approved' AND date >= ? AND group_known_date IS NOT NULL ORDER BY date`).all(today);
     if (!open.length) return null;
@@ -452,6 +458,8 @@ export function createService({ db, config, notifier }) {
     if (named.length) target = open.find(c => c.date === [...named].sort()[0]);
     else if (open.length === 1) target = open[0];
     else if (waiting.length === 1) target = waiting[0];
+    if (onlyWaiting && (!target || !waiting.includes(target)) && !(named.length === 0 && waiting.length === 1 && (target = waiting[0]))) return null;
+    if (onlyWaiting && /\b(done|finished|all set|paid)\b/i.test(body)) return null;
     if (target) offered = datesIn(body, target.date).filter(d => d !== target.date && !(named.length > 1 && named.includes(d)));
     else {
       // Several open cleanings and none named: the one whose turnover her day falls in.
@@ -489,8 +497,12 @@ export function createService({ db, config, notifier }) {
     // "Can't do the 4th, how about the 3rd?" or "Yes, the 3rd" (a yes to a different day than
     // she was asked about): try moving the cleaning to her day. A plain yes, or a yes naming the
     // cleaning's own date, finds no other day and falls through to confirming.
-    if (isCleaner(phone, author) && (saysYes(body) ? !/\b(both|all|each)\b/i.test(body) : offersOtherDay(body))) {
-      const s = cleanerSuggestion(body, { yes: saysYes(body) });
+    // With no clear wording, a text that just names another day ("the 3rd?") still counts when a
+    // cleaning is waiting on her answer and the day fits; it's only a quiet move, never a warning.
+    if (isCleaner(phone, author) && (saysYes(body) ? !/\b(both|all|each)\b/i.test(body) : true)) {
+      const yes = saysYes(body), cue = !yes && offersOtherDay(body);
+      const short = String(body).trim().split(/\s+/).length <= 4;
+      const s = (yes || cue || short) ? cleanerSuggestion(body, { yes: yes || !cue, onlyWaiting: !yes && !cue }) : null;
       if (s) return { confirmed: [], suggestion: s };
     }
     if (!isCleaner(phone, author) || !saysYes(body)) return { confirmed: [] };
@@ -657,6 +669,6 @@ export function createService({ db, config, notifier }) {
 
   return {
     get, list, stageOf, describe, windowFor, cleaningInWindow, addPersonalStay, updatePersonalStay, removePersonalStay, requestApproval, approve, approveProposal, dropCoveredProposals, decline, decideGroupMessage, unsendGroupMessage, remove, testGroupMessage, undoSkip, restoreDeclined, addManual, move, cancel,
-    customGroupMessage, confirmByCleaner, cleanerReply, mentionedDates, datesIn, hooks, autoComplete, recordPaymentRequest, markPaid, unmarkPaid, markCleaned, logEvent, update,
+    customGroupMessage, confirmByCleaner, cleanerReply, saysYes, mentionedDates, datesIn, hooks, autoComplete, recordPaymentRequest, markPaid, unmarkPaid, markCleaned, logEvent, update,
   };
 }
