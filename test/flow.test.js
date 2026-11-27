@@ -1430,3 +1430,30 @@ test('cleaner offers another day: words ("the third"), "yes, the 3rd", and other
   assert.deepEqual(r.confirmed.map(c => c.id), [id]);
   assert.equal(app.service.get(id).date, plus(9));
 });
+
+test('"Let’s do the 3rd" moves the cleaning waiting on her answer, even with another cleaning in the same gap', async () => {
+  const { app } = setup();
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  const plus = (n) => { const d = new Date(today + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  const book = (uid, a, b) => app.db.prepare("INSERT INTO bookings (uid, check_in, check_out, summary, status, first_seen, last_seen) VALUES (?,?,?,'Reserved','active','x','x')").run(uid, a, b);
+  const mk = (d, confirmed) => Number(app.db.prepare("INSERT INTO cleanings (source, date, status, group_known_date, cleaner_confirmed_at, created_at, updated_at) VALUES ('manual', ?, 'approved', ?, ?, 'x', 'x')").run(d, d, confirmed ? 'x' : null).lastInsertRowid);
+  // Like Mark's calendar: guests leave day 4, next arrive day 8; a confirmed cleaning on day 5, a test one asked on day 7.
+  book('john', plus(1), plus(4)); book('rishab', plus(8), plus(10));
+  const real = mk(plus(5), true), asked = mk(plus(7), false);
+  const n = +plus(6).slice(8), sfx = n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th';
+  const r = app.service.cleanerReply({ body: `Let’s do the ${n}${sfx}`, author: 'Rosa' });
+  assert.equal(r.suggestion?.moved, true, JSON.stringify(r));
+  assert.equal(app.service.get(asked).date, plus(6));
+  assert.ok(app.service.get(asked).cleaner_confirmed_at);
+  assert.equal(app.service.get(real).date, plus(5));
+  assert.equal(app.db.prepare("SELECT COUNT(*) n FROM cleanings").get().n, 2);
+  // A day named with nothing waiting on her is left alone (no surprise moves).
+  assert.equal(app.service.cleanerReply({ body: `the ${n}${sfx} was nice`, author: 'Rosa' }).suggestion, undefined);
+});
+
+test('Messages system notices are not saved as texts', async () => {
+  const { app } = setup();
+  const r = app.phoneInbox.receive({ title: 'Messages', text: 'Messages is doing work in the background' });
+  assert.equal(r.saved, false);
+  assert.equal(app.db.prepare("SELECT COUNT(*) n FROM notes").get().n, 0);
+});

@@ -430,11 +430,11 @@ export function createService({ db, config, notifier }) {
   const hooks = { suggested: () => {} };
   function offersOtherDay(text) {
     const t = String(text || '').toLowerCase();
-    return /\b(no|nope|can'?t|cannot|won'?t|unable|not available|busy|booked|instead|how about|what about|could (?:do|come|clean)|can (?:do|come|clean)|works? better|would work|rather|prefer|switch|move it)\b/.test(t)
+    return /\b(no|nope|can'?t|cannot|won'?t|unable|not available|busy|booked|instead|how about|what about|what if|could (?:do|come|clean)|can (?:do|come|clean)|can i (?:do|come)|works? better|better for me|would work|works for me|rather|prefer|switch|move it|let'?s|lets|go with|i'?ll (?:do|come)|ok(?:ay)?,? the)\b/.test(t)
       && !/\b(done|finished|all set|paid)\b/.test(t)
       && !/\b(can'?t wait|no problem|no prob|no worries|no rush)\b/.test(t);
   }
-  function cleanerSuggestion(body, { yes = false } = {}) {
+  function cleanerSuggestion(body, { yes = false, onlyWaiting = false } = {}) {
     const today = todayIn(config.timezone);
     const open = db.prepare(`SELECT * FROM cleanings WHERE status = 'approved' AND date >= ? AND group_known_date IS NOT NULL ORDER BY date`).all(today);
     if (!open.length) return null;
@@ -452,6 +452,8 @@ export function createService({ db, config, notifier }) {
     if (named.length) target = open.find(c => c.date === [...named].sort()[0]);
     else if (open.length === 1) target = open[0];
     else if (waiting.length === 1) target = waiting[0];
+    if (onlyWaiting && (!target || !waiting.includes(target)) && !(named.length === 0 && waiting.length === 1 && (target = waiting[0]))) return null;
+    if (onlyWaiting && /\b(done|finished|all set|paid)\b/i.test(body)) return null;
     if (target) offered = datesIn(body, target.date).filter(d => d !== target.date && !(named.length > 1 && named.includes(d)));
     else {
       // Several open cleanings and none named: the one whose turnover her day falls in.
@@ -489,8 +491,11 @@ export function createService({ db, config, notifier }) {
     // "Can't do the 4th, how about the 3rd?" or "Yes, the 3rd" (a yes to a different day than
     // she was asked about): try moving the cleaning to her day. A plain yes, or a yes naming the
     // cleaning's own date, finds no other day and falls through to confirming.
-    if (isCleaner(phone, author) && (saysYes(body) ? !/\b(both|all|each)\b/i.test(body) : offersOtherDay(body))) {
-      const s = cleanerSuggestion(body, { yes: saysYes(body) });
+    // With no clear wording, a text that just names another day ("the 3rd?") still counts when a
+    // cleaning is waiting on her answer and the day fits; it's only a quiet move, never a warning.
+    if (isCleaner(phone, author) && (saysYes(body) ? !/\b(both|all|each)\b/i.test(body) : true)) {
+      const yes = saysYes(body), cue = !yes && offersOtherDay(body);
+      const s = cleanerSuggestion(body, { yes: yes || !cue, onlyWaiting: !yes && !cue });
       if (s) return { confirmed: [], suggestion: s };
     }
     if (!isCleaner(phone, author) || !saysYes(body)) return { confirmed: [] };
