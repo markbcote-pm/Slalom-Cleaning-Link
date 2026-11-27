@@ -16,7 +16,7 @@ export async function syncAirbnb({ db, config, service, fetchImpl = globalThis.f
   const stamp = now.toISOString();
   const reservations = parseIcal(text).filter(isReservation);
   const seen = new Set();
-  const result = { added: 0, moved: 0, cancelled: 0, total: reservations.length, newBookings: [], changed: [] };
+  const result = { added: 0, moved: 0, cancelled: 0, total: reservations.length, newBookings: [], changed: [], arrivals: [], clashes: [] };
   // The very first check finds every existing booking; that isn't news worth a notification.
   const firstRun = !db.prepare('SELECT 1 FROM bookings LIMIT 1').get();
 
@@ -63,8 +63,27 @@ export async function syncAirbnb({ db, config, service, fetchImpl = globalThis.f
       // Only follow Airbnb if nobody moved this cleaning by hand.
       await service.move(cleaning.id, r.end, 'Airbnb', { fromAirbnb: true });
       result.moved++;
-      result.changed.push({ uid: r.uid, cleaning: service.get(cleaning.id) });
+      const next = db.prepare("SELECT check_in FROM bookings WHERE status='active' AND uid != ? AND check_in >= ? ORDER BY check_in LIMIT 1").get(r.uid, existing.check_out)?.check_in;
+      result.changed.push({ uid: r.uid, cleaning: service.get(cleaning.id), clash: next && next < r.end ? next : null });
+    } else if (existing && existing.check_out !== r.end && cleaning.date > r.start && cleaning.date < r.end && cleaning.date >= today) {
+      // The cleaning was moved by hand, and the stay now runs over it.
+      await service.stayOverlaps(cleaning.id, r.start, r.end);
+      result.clashes.push({ uid: r.uid, cleaning: service.get(cleaning.id) });
     }
+  }
+
+  // Pass 3: a stay whose arrival moved changes the turnover before it. The cleaning for that
+  // turnover is the last live one between the previous checkout and the later arrival date.
+  for (const r of reservations) {
+    const existing = previous.get(r.uid);
+    if (!existing || existing.check_in === r.start || r.start < today) continue;
+    const latest = r.start > existing.check_in ? r.start : existing.check_in;
+    const prior = db.prepare("SELECT check_out FROM bookings WHERE status='active' AND uid != ? AND check_out <= ? ORDER BY check_out DESC LIMIT 1").get(r.uid, latest)?.check_out || today;
+    const c = db.prepare(`SELECT * FROM cleanings WHERE status NOT IN ('cancelled','declined','completed','paid') AND date >= ? AND date >= ? AND date <= ?
+      AND (booking_uid IS NULL OR booking_uid != ?) ORDER BY date DESC LIMIT 1`).get(prior, today, latest, r.uid);
+    if (!c) continue;
+    const a = await service.arrivalChanged(c.id, existing.check_in, r.start);
+    result.arrivals.push({ uid: r.uid, cleaning: service.get(c.id), from: existing.check_in, to: r.start, fits: a.fits, message: a.message || null });
   }
 
   // Bookings that vanished from the feed were cancelled. A feed with no events at all

@@ -1,3 +1,4 @@
+import { cleanerKey } from './cleanerview.js';
 import { prettyDate, prettyTime, addDays, todayIn } from './dates.js';
 import { liveStamp, LIVE_JS } from './live.js';
 
@@ -940,11 +941,29 @@ ${flash && /notification/i.test(flash) ? `<p class="flash">${h(flash)}</p>` : ''
 </script></div>`;
 }
 
+// The cleaner's private link: copy it or share it straight into the group text.
+function cleanerLinkCard(config, db, flash) {
+  const name = config.cleaner?.name || 'the cleaner';
+  const url = `${config.baseUrl || ''}/c/${cleanerKey(db)}`;
+  const showFlash = flash && /New link made/.test(flash);
+  return `<div class="card" id="cleaner-link"><h2>${h(name)}'s link</h2>
+${showFlash ? `<p class="flash">${h(flash)}</p>` : ''}
+<p>A page for ${h(name)} with no password: the cleanings she's been texted (asked or confirmed), with checkout and next check-in times, and a button to add them to her phone's calendar. No prices, notes, guest names or cleanings still waiting on your OK.</p>
+<p><input id="cl-url" readonly value="${h(url)}" style="width:100%" onclick="this.select()"></p>
+<p><button type="button" id="cl-copy">Copy link</button> <button type="button" class="ghost" id="cl-share" data-title="Cleanings at ${h(config.propertyName)}" data-text="Here are your cleanings at ${h(config.propertyName)}. Tap &quot;Add to my calendar&quot; to get them on your phone:">Share…</button> <a class="ghost" href="${h(url)}" target="_blank" rel="noopener">Open it</a></p>
+<form method="post" action="/cleaner-link/reset" onsubmit="return confirm('Make a new link? The old one stops working.')"><button class="ghost">Make a new link</button></form>
+<p class="muted">Making a new link turns the old one off, in case it gets passed around.</p>
+<script>(()=>{const u=document.getElementById('cl-url').value,c=document.getElementById('cl-copy'),s=document.getElementById('cl-share');
+c.onclick=async()=>{try{await navigator.clipboard.writeText(u)}catch{const i=document.getElementById('cl-url');i.select();document.execCommand('copy')}c.textContent='Copied!';setTimeout(()=>c.textContent='Copy link',2000)};
+if(!navigator.share)s.hidden=true;else s.onclick=()=>navigator.share({title:s.dataset.title,text:s.dataset.text,url:u}).catch(()=>{});})();</script></div>`;
+}
+
 export function morePage({ config, db, who, flash, push, phoneInbox }) {
   const outbox = db.prepare('SELECT * FROM outbox ORDER BY id DESC LIMIT 40').all();
   return layout('More', `${header({ config, db, who, active: 'more' })}
+${cleanerLinkCard(config, db, flash)}
 ${phoneCard(config, who, phoneInbox)}
-${textingCard(config, who, flash && !/notification/i.test(flash) ? flash : '', Object.fromEntries(db.prepare("SELECT key, value FROM meta WHERE key LIKE 'consent:%'").all().map(r => [r.key.slice(8), JSON.parse(r.value)])))}
+${textingCard(config, who, flash && !/notification|New link made/i.test(flash) ? flash : '', Object.fromEntries(db.prepare("SELECT key, value FROM meta WHERE key LIKE 'consent:%'").all().map(r => [r.key.slice(8), JSON.parse(r.value)])))}
 ${push ? pushCard(push, flash) : ''}
 <div class="card"><h2>Sign out</h2><p class="muted">Signs this device out. To sign out every device, change ADMIN_PASSWORD in Render.</p><form method="post" action="/logout"><button class="ghost">Sign out of this device</button></form></div>
 <div class="card"><h2>Calendar for Google, iCal and Skylight</h2><p>Subscribe to this address (Google Calendar: Other calendars, From URL):</p>

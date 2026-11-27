@@ -6,6 +6,7 @@ import { parseIcal } from '../src/ical.js';
 import { localToUtc } from '../src/dates.js';
 import { cleaningFeed } from '../src/feed.js';
 import { cleaningWindows, guestLabel, cleaningState } from '../src/views.js';
+import { cleanerKey } from '../src/cleanerview.js';
 
 const NOW = new Date('2026-11-01T18:00:00Z');
 
@@ -1584,4 +1585,77 @@ test('Jen answers each request with "Confirmed": each one books the request it f
   say('Confirmed\nConfirmed');
   assert.equal(app.db.prepare("SELECT COUNT(*) n FROM events WHERE stage='Cleaner confirmed'").get().n, before + 1);
   assert.ok(app.service.get(ids[0]).cleaner_confirmed_at, 'the remaining request');
+});
+
+test('Airbnb moves the next arrival: the cleaning before it is checked and Jen can get a heads-up', async () => {
+  const { app, outbox, clearOutbox, sync } = setup();
+  try {
+    await sync([['s1', '2026-11-05', '2026-11-08'], ['s2', '2026-11-12', '2026-11-15']]);
+    const c = app.db.prepare("SELECT * FROM cleanings WHERE date = '2026-11-08'").get();
+    const { message } = await app.service.approveProposal(c.id, 'Mark');
+    await app.service.decideGroupMessage(message.token, true, 'Mark');
+    clearOutbox();
+    // Next guests now arrive the day of the cleaning: still fits, a heads-up is drafted and Mark is asked.
+    let r = await sync([['s1', '2026-11-05', '2026-11-08'], ['s2', '2026-11-08', '2026-11-15']]);
+    assert.deepEqual(r.arrivals.map(a => [a.cleaning.id, a.from, a.to, a.fits]), [[c.id, '2026-11-12', '2026-11-08', true]]);
+    assert.match(r.arrivals[0].message.body, /HEADS UP for the .*Nov 8.* cleaning.*arrive \d+ PM the same day/);
+    assert.equal(r.arrivals[0].message.status, 'pending');
+    assert.ok(outbox().some(m => /should I tell the group text/.test(m.body)));
+    assert.equal(app.db.prepare("SELECT COUNT(*) n FROM group_messages WHERE status='sent'").get().n, 1, 'nothing sent to the group');
+    // Arrival before the cleaning: it doesn't fit, Mark is warned.
+    clearOutbox();
+    r = await sync([['s1', '2026-11-05', '2026-11-08'], ['s2', '2026-11-07', '2026-11-15']]);
+    assert.equal(r.arrivals[0].fits, false);
+    assert.ok(outbox().some(m => /before the .*Nov 8.* cleaning. Pick a new day/.test(m.body)));
+    assert.match(app.db.prepare("SELECT detail FROM events WHERE cleaning_id = ? AND stage = 'Next arrival changed' ORDER BY id DESC").get(c.id).detail, /before this cleaning/);
+    // A later arrival only drafts the heads-up, without texting Mark.
+    clearOutbox();
+    r = await sync([['s1', '2026-11-05', '2026-11-08'], ['s2', '2026-11-13', '2026-11-15']]);
+    assert.equal(r.arrivals[0].fits, true);
+    assert.equal(outbox().length, 0);
+    // A cleaning moved by hand that the extended stay now runs over: warned, not moved.
+    await app.service.move(c.id, '2026-11-10', 'Mark');
+    clearOutbox();
+    r = await sync([['s1', '2026-11-05', '2026-11-11'], ['s2', '2026-11-13', '2026-11-15']]);
+    assert.deepEqual(r.clashes.map(x => x.cleaning.id), [c.id]);
+    assert.equal(app.service.get(c.id).date, '2026-11-10');
+    assert.ok(outbox().some(m => /falls during their stay/.test(m.body)));
+  } finally { app.stop(); }
+});
+
+test("Jen's private link shows only the cleanings she was texted, with no login", async () => {
+  const { app, sync } = setup();
+  await new Promise(r => app.server.listen(0, r));
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const auth = { Authorization: 'Basic ' + Buffer.from('x:pw').toString('base64') };
+  try {
+    await sync([['s1', '2026-11-05', '2026-11-08', 'Smith family'], ['s2', '2026-11-12', '2026-11-15']]);
+    const sent = app.db.prepare("SELECT * FROM cleanings WHERE date = '2026-11-08'").get();
+    const { message } = await app.service.approveProposal(sent.id, 'Mark');
+    await app.service.decideGroupMessage(message.token, true, 'Mark');
+    // Nov 15 is still only proposed: Jen shouldn't see it.
+    const key = cleanerKey(app.db);
+    // The page is served even if "today" is after these dates; use a far-future pair too.
+    const late = await app.service.addManual('2099-03-05', null, 'Mark');
+    await app.service.decideGroupMessage(late.message.token, true, 'Mark');
+    let res = await fetch(`${base}/c/${key}`);
+    assert.equal(res.status, 200);
+    let page = await res.text();
+    assert.match(page, /Thu, Mar 5/);
+    assert.match(page, /Waiting for your reply/);
+    assert.doesNotMatch(page, /Nov 15/);
+    assert.doesNotMatch(page, /Smith|\$|120/);
+    res = await fetch(`${base}/c/${key}.ics`);
+    const ics = await res.text();
+    assert.match(ics, /BEGIN:VCALENDAR/);
+    assert.match(ics, /SUMMARY:Cleaning · 2072 Slalom Ct \(not confirmed yet\)/);
+    assert.equal((await fetch(`${base}/c/wrongkey`)).status, 404);
+    // More shows the link to copy; making a new one turns the old one off.
+    const more = await (await fetch(`${base}/more`, { headers: auth })).text();
+    assert.ok(more.includes(`/c/${key}`));
+    assert.match(more, /Copy link/);
+    await fetch(`${base}/cleaner-link/reset`, { method: 'POST', headers: auth, redirect: 'manual' });
+    assert.equal((await fetch(`${base}/c/${key}`)).status, 404);
+    assert.equal((await fetch(`${base}/c/${cleanerKey(app.db)}`)).status, 200);
+  } finally { app.stop(); }
 });
