@@ -74,6 +74,11 @@ export function createService({ db, config, notifier }) {
     const body = kind === 'moved'
       ? `CLEANING DATE CHANGED: was ${prettyDate(c.group_known_date)}, now ${describe(done)}`
       : confirmText(done);
+    // Phone mode: the text can only go out from a phone, so it waits to be shared there.
+    if (config.groupMode === 'phone') {
+      const message = await askAboutGroupMessage(done, kind, body);
+      return { cleaning: get(c.id), message };
+    }
     await sendGroupNow(done, kind, body, by);
     return { cleaning: get(c.id) };
   }
@@ -174,6 +179,19 @@ export function createService({ db, config, notifier }) {
     const done = update(c.id, { status: 'awaiting_approval', approval_token: token() });
     logEvent(c.id, 'Approval requested', `Restored by ${by} after it was declined`);
     return { cleaning: done };
+  }
+
+  // Phone mode: a text was marked sent but never reached the group (e.g. tapped on a computer).
+  // Put it back to waiting so it can be shared from a phone.
+  function unsendGroupMessage(msgToken, by) {
+    const m = db.prepare('SELECT * FROM group_messages WHERE token = ?').get(msgToken);
+    if (!m || m.status !== 'sent') return { error: 'That text is not marked sent.' };
+    const newer = db.prepare("SELECT 1 FROM group_messages WHERE cleaning_id = ? AND id > ? AND status IN ('pending','sent')").get(m.cleaning_id, m.id);
+    if (newer) return { error: 'A newer text for this cleaning has replaced it.' };
+    db.prepare("UPDATE group_messages SET status='pending', decided_by=NULL, decided_at=NULL WHERE id = ?").run(m.id);
+    if (m.kind !== 'custom') update(m.cleaning_id, { group_notified_at: null, group_known_date: null, cleaner_confirmed_at: null });
+    logEvent(m.cleaning_id, 'Group text undone', `Didn't reach the group, marked by ${by}. Waiting to be sent again.`);
+    return { message: db.prepare('SELECT * FROM group_messages WHERE id = ?').get(m.id) };
   }
 
   async function decideGroupMessage(msgToken, send, by, editedBody) {
@@ -513,7 +531,7 @@ export function createService({ db, config, notifier }) {
   }
 
   return {
-    get, list, stageOf, describe, windowFor, cleaningInWindow, addPersonalStay, updatePersonalStay, removePersonalStay, requestApproval, approve, approveProposal, dropCoveredProposals, decline, decideGroupMessage, testGroupMessage, undoSkip, restoreDeclined, addManual, move, cancel,
+    get, list, stageOf, describe, windowFor, cleaningInWindow, addPersonalStay, updatePersonalStay, removePersonalStay, requestApproval, approve, approveProposal, dropCoveredProposals, decline, decideGroupMessage, unsendGroupMessage, testGroupMessage, undoSkip, restoreDeclined, addManual, move, cancel,
     customGroupMessage, confirmByCleaner, cleanerReply, mentionedDates, autoComplete, recordPaymentRequest, markPaid, unmarkPaid, markCleaned, logEvent, update,
   };
 }

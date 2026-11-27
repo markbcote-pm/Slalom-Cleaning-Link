@@ -9,13 +9,13 @@ import { createService } from './service.js';
 import { syncAirbnb } from './sync.js';
 import { cleaningFeed } from './feed.js';
 import { isDate, todayIn, prettyDate, localToUtc } from './dates.js';
-import { layout, messagePage, approvalPage, groupDecisionPage, dashboard, notesPage, todosPage, cleaningPage, inboxPage, staysPage, paymentsCsv, morePage, loginPage, phoneSendPage, shareInPage, guestPhotosPage } from './views.js';
+import { layout, messagePage, approvalPage, groupDecisionPage, dashboard, notesPage, todosPage, cleaningPage, inboxPage, staysPage, paymentsCsv, morePage, loginPage, shareInPage, guestPhotosPage } from './views.js';
 import { createNotes, validTwilioSignature } from './notes.js';
 import { createPush, SERVICE_WORKER } from './push.js';
 import { createFinance, financeRoutes, readForm, sniff } from './finance.js';
 import { createTextPay } from './textpay.js';
 import { createPhotos } from './photos.js';
-import { groupSmsLink, createPhoneInbox, inboundFields } from './phone.js';
+import { createPhoneInbox, inboundFields } from './phone.js';
 import { smsInfoPage, privacyPage, termsPage, confirmationText, joinPage } from './policy.js';
 
 const ASSETS = {
@@ -205,23 +205,15 @@ export function createApp(config, deps = {}) {
       const by = validName(body.get('by'));
       const r = body.get('action') === 'decline' ? await service.decline(m[1], by) : await service.approve(m[1], by);
       if (r.error) return send(res, 404, messagePage('Link expired', r.error));
+      // Phone mode: approving leaves the group text waiting; the next page shares it from this phone.
       if (config.groupMode === 'phone' && r.cleaning.status === 'approved' && !r.already) {
-        const gm = db.prepare("SELECT token FROM group_messages WHERE cleaning_id = ? AND status = 'sent' ORDER BY id DESC").get(r.cleaning.id);
-        if (gm) return redirect(res, `/g/${gm.token}/open?by=${encodeURIComponent(by)}&approved=1`);
+        const gm = db.prepare("SELECT token FROM group_messages WHERE cleaning_id = ? AND status = 'pending' ORDER BY id DESC").get(r.cleaning.id);
+        if (gm) return redirect(res, `/g/${gm.token}?by=${encodeURIComponent(by)}`);
       }
       const done = r.cleaning.status === 'approved'
         ? `Approved by ${by}. The group text has been sent and it's on the shared calendar.`
         : `Declined by ${by}. Nothing was sent to the cleaner.`;
       return send(res, 200, messagePage('Thanks', done));
-    }
-
-    // GROUP_MODE=phone: last step of sending, open Messages with the group and the text filled in.
-    m = p.match(/^\/g\/([\w-]+)\/open$/);
-    if (m && req.method === 'GET') {
-      const gm = db.prepare('SELECT * FROM group_messages WHERE token = ?').get(m[1]);
-      if (!gm || gm.status !== 'sent') return send(res, 404, messagePage('Nothing to send', 'This message was not approved, or was replaced by a newer change.'));
-      const by = validName(url.searchParams.get('by') || cookie(req, 'who'));
-      return send(res, 200, phoneSendPage(gm, groupSmsLink(config, by, gm.body), { approved: url.searchParams.get('approved') === '1', by, inApp: authed(req) }));
     }
 
     // "Should I text the group about this change?" links
@@ -232,11 +224,22 @@ export function createApp(config, deps = {}) {
       if (req.method === 'GET') {
         const c = service.get(gm.cleaning_id);
         const staying = !!db.prepare("SELECT 1 FROM bookings WHERE status='active' AND check_in < ? AND check_out > ?").get(c.date, c.date);
-        return send(res, 200, groupDecisionPage(gm, c, url.searchParams.get('by') || cookie(req, 'who'), config.approvers, staying && !['cancelled', 'declined'].includes(c.status)));
+        return send(res, 200, groupDecisionPage(gm, c, url.searchParams.get('by') || cookie(req, 'who'), config.approvers, staying && !['cancelled', 'declined'].includes(c.status), '', config.groupMode === 'phone'));
       }
       const body = await readBody(req);
       const by = validName(body.get('by'));
       const inApp = authed(req);
+      // Phone mode: a text marked sent that never reached the group goes back to waiting.
+      if (body.get('send') === 'unsend' && inApp) {
+        const u = service.unsendGroupMessage(m[1], by);
+        if (u.error) return redirect(res, '/?flash=' + encodeURIComponent(u.error));
+        return redirect(res, msgUrl(m[1], `&msgnote=${encodeURIComponent('Back to waiting. Tap Share to the group on your phone to send it.')}`));
+      }
+      // Phone mode: only a share made on a phone counts as sending (the page's script adds shared=1).
+      if (config.groupMode === 'phone' && body.get('send') === '1' && body.get('shared') !== '1') {
+        const note = 'Group texts go out from your phone. Open Cleaning on your phone and tap Share to the group. This one is still waiting.';
+        return inApp ? redirect(res, msgUrl(m[1], `&msgnote=${encodeURIComponent(note)}`)) : send(res, 409, messagePage('Not sent yet', note));
+      }
       if (body.get('send') === 'undo') {
         const u = service.undoSkip(m[1], by);
         if (u.error) return send(res, 409, messagePage('Can\'t undo', u.error, inApp ? '<p><a class="btn" href="/inbox">Waiting on you</a></p>' : ''));
@@ -250,11 +253,7 @@ export function createApp(config, deps = {}) {
         }
         const r = await service.decideGroupMessage(m[1], body.get('send') === '1', by, body.get('body'));
         if (r.error) return redirect(res, '/?flash=' + encodeURIComponent(r.error));
-        // The dialog's script already opened Messages; without it, show the Open in Messages step.
-        if (config.groupMode === 'phone' && r.message.status === 'sent' && !r.already) {
-          if (body.get('js') === '1') return send(res, 200, JSON.stringify({ ok: true }), 'application/json');
-          return redirect(res, `/g/${m[1]}/open?by=${encodeURIComponent(by)}`);
-        }
+        if (body.get('js') === '1') return send(res, 200, JSON.stringify({ ok: true, status: r.message.status }), 'application/json');
         const month = msgUrl(m[1]).match(/month=([\d-]+)/)?.[1] || '';
         const msg = r.already ? 'That text was already decided.' : r.message.status === 'sent' ? 'Sent to the group text.' : 'Not sent. To change your mind, use Undo under Waiting on you, Recently cleared.';
         return redirect(res, `/?month=${month}&flash=${encodeURIComponent(msg)}`);
@@ -266,11 +265,11 @@ export function createApp(config, deps = {}) {
         const staying = !!db.prepare("SELECT 1 FROM bookings WHERE status='active' AND check_in < ? AND check_out > ?").get(c.date, c.date);
         const note = t.error ? t.error
           : `Test sent only to ${t.to.name}${t.to.phone ? ` (${t.to.phone})` : ` by email`}.${t.dryRun ? ' Texting is still in test mode, so it was logged on the More tab instead of really sent.' : ''} The group got nothing.`;
-        return send(res, 200, groupDecisionPage(fresh, c, by, config.approvers, staying && !['cancelled', 'declined'].includes(c.status), note));
+        return send(res, 200, groupDecisionPage(fresh, c, by, config.approvers, staying && !['cancelled', 'declined'].includes(c.status), note, config.groupMode === 'phone'));
       }
       const r = await service.decideGroupMessage(m[1], body.get('send') === '1', by, body.get('body'));
       if (r.error) return send(res, 404, messagePage('Link expired', r.error));
-      if (config.groupMode === 'phone' && r.message.status === 'sent' && !r.already) return redirect(res, `/g/${m[1]}/open?by=${encodeURIComponent(by)}`);
+      if (body.get('js') === '1') return send(res, 200, JSON.stringify({ ok: true, status: r.message.status }), 'application/json');
       const back = authed(req) ? '<p><a class="btn" href="/">Back to dashboard</a></p>' : '';
       const undo = r.message.status === 'skipped' && !r.already
         ? `<form method="post" style="margin-bottom:10px"><input type="hidden" name="by" value="${by.replace(/"/g, '&quot;')}"><button class="ghost" name="send" value="undo">Undo, bring the message back</button></form>` : '';
