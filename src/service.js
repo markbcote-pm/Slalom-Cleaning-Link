@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { tx } from './db.js';
-import { prettyDate, prettyTime, todayIn, addDays } from './dates.js';
+import { prettyDate, prettyTime, todayIn, addDays, isDate } from './dates.js';
 
 const token = () => crypto.randomBytes(18).toString('base64url');
 const nowIso = () => new Date().toISOString();
@@ -384,7 +384,90 @@ export function createService({ db, config, notifier }) {
         || new RegExp(`\\b(the\\s+)?${day}(st|nd|rd|th)\\b`).test(t);
     });
   }
+  // Every date a text could mean, in the order written, read around `near` (the cleaning's
+  // date): "Dec 5", "12/5", "the 5th", "Saturday", "the day after".
+  const WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+  function datesIn(text, near) {
+    const t = String(text || '').toLowerCase();
+    const found = [];
+    const nearest = (cands) => cands.filter(isDate).sort((a, b) => Math.abs(dayDiff(a, near)) - Math.abs(dayDiff(b, near)))[0];
+    const ymd = (y, m, d) => `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const ny = Number(near.slice(0, 4)), nm = Number(near.slice(5, 7));
+    const withYear = (m, d) => nearest([ny - 1, ny, ny + 1].map(y => ymd(y, m, d)));
+    const add = (i, d) => { if (d && isDate(d) && new Date(d + 'T12:00:00Z').getUTCDate() === Number(d.slice(8))) found.push([i, d]); };
+    const spans = [];
+    for (const x of t.matchAll(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s*(\d{1,2})(?:st|nd|rd|th)?\b/g)) { spans.push([x.index, x.index + x[0].length]); add(x.index, withYear(MONTHS.indexOf(x[1].slice(0, 3)) + 1, +x[2])); }
+    const inSpan = (i) => spans.some(([a, b]) => i >= a && i < b);
+    for (const x of t.matchAll(/\b(\d{1,2})\/(\d{1,2})\b/g)) add(x.index, withYear(+x[1], +x[2]));
+    for (const x of t.matchAll(/\b(\d{1,2})(st|nd|rd|th)\b/g)) if (!inSpan(x.index)) add(x.index, nearest([-1, 0, 1].map(k => { const m = ((nm - 1 + k + 12) % 12) + 1; return ymd(ny + Math.floor((nm - 1 + k) / 12), m, +x[1]); })));
+    for (const x of t.matchAll(/\b(sun|mon|tue|wed|thu|fri|sat)(?:day|s|sday|nesday|r|rs|rsday|urday)?\b/g)) {
+      const want = WEEKDAYS.indexOf(x[1]);
+      add(x.index, nearest([-6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6].map(k => addDays(near, k)).filter(d => new Date(d + 'T12:00:00Z').getUTCDay() === want)));
+    }
+    for (const x of t.matchAll(/\b(day after|next day|day before)\b/g)) add(x.index, addDays(near, x[1] === 'day before' ? -1 : 1));
+    return [...new Set(found.sort((a, b) => a[0] - b[0]).map(f => f[1]))];
+  }
+  const dayDiff = (a, b) => Math.round((new Date(a + 'T12:00:00Z') - new Date(b + 'T12:00:00Z')) / 864e5);
+
+  // "Can't do the 4th, how about the 5th?" The cleaner can't make a date and offers another.
+  // If her day still falls between the checkout before it and the next check-in, the cleaning
+  // moves there and counts as confirmed (she picked it, in front of everyone). Otherwise it
+  // stays put and Mark and Danielle are told why. Nothing is texted to the group either way.
+  const hooks = { suggested: () => {} };
+  function offersOtherDay(text) {
+    const t = String(text || '').toLowerCase();
+    return /\b(no|nope|can'?t|cannot|won'?t|unable|not available|busy|booked|instead|how about|what about|could (?:do|come|clean)|can (?:do|come|clean)|works? better|would work|rather|prefer|switch|move it)\b/.test(t)
+      && !/\b(done|finished|all set|paid)\b/.test(t)
+      && !/\b(can'?t wait|no problem|no prob|no worries|no rush)\b/.test(t);
+  }
+  function cleanerSuggestion(body) {
+    const today = todayIn(config.timezone);
+    const open = db.prepare(`SELECT * FROM cleanings WHERE status = 'approved' AND date >= ? AND group_known_date IS NOT NULL ORDER BY date`).all(today);
+    if (!open.length) return null;
+    const named = mentionedDates(body, open.map(c => c.date));
+    const fits = (c, d) => {
+      const { prior, next } = windowFor(c.date);
+      const from = [today, prior?.check_out].filter(Boolean).sort().pop();
+      const to = next ? next.check_in : addDays(c.date, 14);
+      return { ok: d !== c.date && d >= from && d <= to, prior, next, from, to };
+    };
+    let target = null, offered = [];
+    if (named.length === 1) target = open.find(c => c.date === named[0]);
+    else if (open.length === 1) target = open[0];
+    if (target) offered = datesIn(body, target.date).filter(d => d !== target.date);
+    else {
+      // Several open cleanings and none named: the one whose turnover her day falls in.
+      const hits = open.map(c => ({ c, ds: datesIn(body, c.date).filter(d => !open.some(o => o.date === d) && fits(c, d).ok) })).filter(x => x.ds.length);
+      if (hits.length !== 1) return null;
+      target = hits[0].c; offered = hits[0].ds;
+    }
+    if (!offered.length) return null;
+    const pick = offered.find(d => fits(target, d).ok);
+    const quote = `"${String(body).trim().slice(0, 80)}"`;
+    if (!pick) {
+      const d = offered[0], f = fits(target, d);
+      const why = d < f.from ? (d < today ? 'that day has passed' : `the guests before don't check out until ${prettyDate(f.from)}`)
+        : f.next ? `the next guests arrive ${prettyDate(f.next.check_in)} at ${prettyTime(config.checkinTime)}` : 'that is more than two weeks later';
+      logEvent(target.id, 'Cleaner suggested another day', `${config.cleaner.name} suggested ${prettyDate(d)}, but ${why}. Not moved. She said ${quote}`);
+      const r = { cleaning: target, from: target.date, to: d, moved: false, why };
+      hooks.suggested(r);
+      return r;
+    }
+    const old = target.date;
+    update(target.id, { date: pick, sequence: target.sequence + 1, group_known_date: pick, cleaner_confirmed_at: nowIso() });
+    db.prepare("UPDATE group_messages SET status='superseded' WHERE cleaning_id = ? AND status = 'pending'").run(target.id);
+    logEvent(target.id, 'Moved', `${prettyDate(old)} to ${prettyDate(pick)}, suggested by ${config.cleaner.name}: ${quote}`);
+    logEvent(target.id, 'Cleaner confirmed', `${config.cleaner.name} picked ${prettyDate(pick)}`);
+    const r = { cleaning: get(target.id), from: old, to: pick, moved: true };
+    hooks.suggested(r);
+    return r;
+  }
+
   function cleanerReply({ body, phone = null, author = null }) {
+    if (isCleaner(phone, author) && !saysYes(body) && offersOtherDay(body)) {
+      const s = cleanerSuggestion(body);
+      if (s) return { confirmed: [], suggestion: s };
+    }
     if (!isCleaner(phone, author) || !saysYes(body)) return { confirmed: [] };
     const today = todayIn(config.timezone);
     const open = db.prepare(`SELECT * FROM cleanings WHERE status NOT IN ('awaiting_approval','declined','cancelled','completed','paid')
@@ -549,6 +632,6 @@ export function createService({ db, config, notifier }) {
 
   return {
     get, list, stageOf, describe, windowFor, cleaningInWindow, addPersonalStay, updatePersonalStay, removePersonalStay, requestApproval, approve, approveProposal, dropCoveredProposals, decline, decideGroupMessage, unsendGroupMessage, remove, testGroupMessage, undoSkip, restoreDeclined, addManual, move, cancel,
-    customGroupMessage, confirmByCleaner, cleanerReply, mentionedDates, autoComplete, recordPaymentRequest, markPaid, unmarkPaid, markCleaned, logEvent, update,
+    customGroupMessage, confirmByCleaner, cleanerReply, mentionedDates, datesIn, hooks, autoComplete, recordPaymentRequest, markPaid, unmarkPaid, markCleaned, logEvent, update,
   };
 }

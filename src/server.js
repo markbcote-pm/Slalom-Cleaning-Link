@@ -45,6 +45,9 @@ export function createApp(config, deps = {}) {
   const textPay = createTextPay({ db, config, service,
     onUnclear: (m) => quietly(push.send({ title: 'Which cleaning was this for?', body: `${m.author}: ${m.body}`.slice(0, 180), url: '/' })),
     onCleaned: (c) => quietly(push.send({ title: `${cleanerName} finished the ${prettyDate(c.date)} cleaning`, body: 'To keep her photos for the next guest: in Messages, select them, tap Share, pick Cleaning.', url: `/cleanings/${c.id}` })) });
+  service.hooks.suggested = (r) => quietly(push.send(r.moved
+    ? { title: `${cleanerName} moved the cleaning to ${prettyDate(r.to)}`, body: `She can't do ${prettyDate(r.from)}. ${prettyDate(r.to)} fits before the next guests, so the calendar is updated.`, url: `/cleanings/${r.cleaning.id}` }
+    : { title: `${cleanerName} suggested ${prettyDate(r.to)}, which doesn't fit`, body: `Not moved: ${r.why}. The cleaning is still ${prettyDate(r.from)}.`, url: `/cleanings/${r.cleaning.id}` }));
   const photos = createPhotos({ db, config });
   const phoneInbox = createPhoneInbox({ db, config, notes, service, onNote: (n) => textPay.handle(n) });
   const fin = createFinance({ db, config });

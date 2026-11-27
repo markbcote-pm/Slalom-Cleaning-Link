@@ -1353,3 +1353,43 @@ test('live screens: pages carry a fingerprint that changes only when the data do
     assert.notEqual(await live(), afterBooking);
   } finally { app.server.close(); }
 });
+
+test('cleaner says no and offers another day: moved if it fits between stays, else left with a reason', async () => {
+  const { app } = setup();
+  const pushes = [];
+  app.service.hooks.suggested = (r) => pushes.push(r);
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  const plus = (n) => { const d = new Date(today + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  const book = (uid, a, b) => app.db.prepare("INSERT INTO bookings (uid, check_in, check_out, summary, status, first_seen, last_seen) VALUES (?,?,?,'Reserved','active','x','x')").run(uid, a, b);
+  book('a', plus(7), plus(10));   // checks out day 10
+  book('b', plus(14), plus(16));  // next guests arrive day 14
+  const id = Number(app.db.prepare("INSERT INTO cleanings (source, date, status, group_known_date, created_at, updated_at) VALUES ('manual', ?, 'approved', ?, 'x', 'x')").run(plus(10), plus(10)).lastInsertRowid);
+  const md = (d) => `${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+d.slice(5, 7) - 1]} ${+d.slice(8)}`;
+  // A yes is still a yes, and someone else's "no" does nothing.
+  assert.equal(app.service.cleanerReply({ body: `Can't do ${md(plus(10))}, sorry`, author: 'Mark' }).suggestion, undefined);
+  // She can't do day 10 and offers day 12: inside the turnover, so it moves and is confirmed.
+  let r = app.service.cleanerReply({ body: `Sorry, I can't do ${md(plus(10))}. How about ${md(plus(12))}?`, author: 'Rosa' });
+  assert.equal(r.suggestion.moved, true);
+  let c = app.service.get(id);
+  assert.equal(c.date, plus(12));
+  assert.equal(c.group_known_date, plus(12));
+  assert.ok(c.cleaner_confirmed_at);
+  assert.equal(pushes.length, 1);
+  // Day 15 is after the next guests arrive: not moved, and the reason is given.
+  r = app.service.cleanerReply({ body: `Actually I can't that day, could do ${md(plus(15))}`, author: 'Rosa' });
+  assert.equal(r.suggestion.moved, false);
+  assert.match(r.suggestion.why, /next guests arrive/);
+  assert.equal(app.service.get(id).date, plus(12));
+  // Before the previous guests leave doesn't fit either.
+  r = app.service.cleanerReply({ body: `No, can I come ${md(plus(9))} instead?`, author: 'Rosa' });
+  assert.equal(r.suggestion.moved, false);
+  assert.match(r.suggestion.why, /check out/);
+  // Nothing was texted to the group.
+  assert.equal(app.db.prepare("SELECT COUNT(*) n FROM outbox").get().n, 0);
+  assert.equal(app.db.prepare("SELECT COUNT(*) n FROM group_messages WHERE status='pending'").get().n, 0);
+  // Friendly texts that happen to have "no"/"can't" and a day aren't suggestions.
+  assert.equal(app.service.cleanerReply({ body: `No problem, see you ${md(plus(13))}!`, author: 'Rosa' }).suggestion, undefined);
+  assert.equal(app.service.cleanerReply({ body: `Can't wait, ${md(plus(13))} it is`, author: 'Rosa' }).suggestion, undefined);
+  // A "done" text with a date is not a suggestion.
+  assert.equal(app.service.cleanerReply({ body: `${md(plus(12))} cleaning is done`, author: 'Rosa' }).suggestion, undefined);
+});

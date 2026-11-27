@@ -85,7 +85,7 @@ export function createPhoneInbox({ db, config, notes, service, onNote = () => {}
     const note = notes.add({ body: n.body, author: n.author, phone: n.phone, source: 'group' });
     const r = note ? service.cleanerReply({ body: n.body, phone: n.phone, author: n.author }) : { confirmed: [] };
     const pay = note ? onNote(note) : null;
-    return { saved: !!note, author: n.author, known: n.known, confirmed: r.confirmed.map(c => c.date),
+    return { saved: !!note, author: n.author, known: n.known, confirmed: r.confirmed.map(c => c.date), ...(r.suggestion ? { moved: r.suggestion.moved ? r.suggestion.to : null, suggested: r.suggestion.to } : {}),
       ...(pay ? { payment: pay.kind, matched: pay.applied ? [].concat(pay.applied).map(c => c.date) : null, unclear: !!pay.pending } : {}) };
   }
   // The last few raw notifications, shown on the More tab so setup problems are easy to see.
