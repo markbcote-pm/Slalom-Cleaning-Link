@@ -1551,3 +1551,37 @@ test('a proposed cleaning can be approved from its own page, as well as from Wai
     assert.match(r.headers.get('location'), /msg=/);
   } finally { app.server.close(); }
 });
+
+test('Jen answers each request with "Confirmed": each one books the request it follows', async () => {
+  const config = loadConfig({ DOTENV: '0', DB_FILE: ':memory:', DRY_RUN: '1', ADMIN_PASSWORD: 'pw', FEED_TOKEN: 'feedtok', GROUP_MODE: 'phone',
+    APPROVERS: 'Mark:+15550000001,Danielle:+15550000002', CLEANER: 'Jen:+15550000003', TIMEZONE: 'America/Los_Angeles' });
+  let now = Date.now();
+  const app = createApp(config, { clock: () => now });
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  const plus = (n) => { const d = new Date(today + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  // Three requests texted to the group one after another (like Jan 4, Jan 10, Jan 18), each answered "Confirmed".
+  const ids = [];
+  const ask = (d, at) => {
+    const id = Number(app.db.prepare("INSERT INTO cleanings (source, date, status, group_known_date, created_at, updated_at) VALUES ('manual', ?, 'approved', ?, 'x', 'x')").run(d, d).lastInsertRowid);
+    app.db.prepare("INSERT INTO group_messages (cleaning_id, kind, body, status, token, decided_by, decided_at, created_at) VALUES (?, 'added', 'x', 'sent', ?, 'Mark', ?, ?)").run(id, 't' + id, at, at);
+    ids.push(id);
+    return id;
+  };
+  const say = (text) => app.phoneInbox.receive({ title: 'Slalom Cleaning (D and Jen): Jennifer Patterson', text });
+  ask(plus(38), '2026-11-27T17:47:00Z');
+  ask(plus(44), '2026-11-27T17:52:00Z');
+  say('Confirmed');   // answers the latest request texted
+  assert.ok(app.service.get(ids[1]).cleaner_confirmed_at);
+  assert.equal(app.service.get(ids[0]).cleaner_confirmed_at, null);
+  ask(plus(52), '2026-11-27T17:54:00Z');
+  // The same word again a couple of minutes later is a new answer, not a repeat.
+  now += 2 * 60e3;
+  say('Confirmed');
+  assert.ok(app.service.get(ids[2]).cleaner_confirmed_at, 'second Confirmed books the newest request');
+  // A notification that grew to show both texts doesn't count the first one twice.
+  const before = app.db.prepare("SELECT COUNT(*) n FROM events WHERE stage='Cleaner confirmed'").get().n;
+  now += 2 * 60e3;
+  say('Confirmed\nConfirmed');
+  assert.equal(app.db.prepare("SELECT COUNT(*) n FROM events WHERE stage='Cleaner confirmed'").get().n, before + 1);
+  assert.ok(app.service.get(ids[0]).cleaner_confirmed_at, 'the remaining request');
+});

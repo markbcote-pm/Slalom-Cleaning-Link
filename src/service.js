@@ -513,7 +513,15 @@ export function createService({ db, config, notifier }) {
     if (open.length === 1) pick = open;
     else if (open.length > 1) {
       const named = mentionedDates(body, open.map(c => c.date));
-      pick = named.length ? open.filter(c => named.includes(c.date)) : /\b(both|all( of them)?|each)\b/i.test(body) ? open : [];
+      if (named.length) pick = open.filter(c => named.includes(c.date));
+      else if (/\b(both|all( of them)?|each)\b/i.test(body)) pick = open;
+      else {
+        // A plain "Confirmed" answers the ask texted to the group most recently, the way she
+        // replies to each request in turn. Asks texted together (within a minute) stay ambiguous.
+        const sentAt = (c) => db.prepare("SELECT MAX(decided_at) t FROM group_messages WHERE cleaning_id = ? AND status = 'sent'").get(c.id)?.t || '';
+        const sent = open.map(c => ({ c, t: Date.parse(sentAt(c)) })).filter(x => x.t).sort((a, b) => b.t - a.t);
+        if (sent.length && (sent.length === 1 || sent[0].t - sent[1].t >= 60e3)) pick = [sent[0].c];
+      }
     }
     for (const c of pick) {
       update(c.id, { cleaner_confirmed_at: nowIso() });
