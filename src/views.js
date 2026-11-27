@@ -698,14 +698,18 @@ function matchDialog({ config, db, textPay, who }) {
     return `<label class="pick"><input type="${paid ? 'checkbox' : 'radio'}" name="cleaning_id" value="${c.id}" ${i === 0 && !paid ? 'checked' : ''}>
 <span><b>${h(prettyDate(c.date))}</b> <span class="muted">· ${h(state)}</span><br><span class="muted">${st ? `after ${h(guestLabel(st))}'s stay` : 'no stay before it'}</span></span></label>`;
   }).join('');
+  // Any other cleaning can be picked too (she named the wrong day, or it's further out).
+  const more = textPay.others(m, cands.map(c => c.id));
+  const other = more.length ? `<label class="pick"><input type="${paid ? 'checkbox' : 'radio'}" name="cleaning_id" value="other" id="match-other" ${!rows && !paid ? 'checked' : ''}>
+<span><b>${rows ? 'Another cleaning' : 'Pick a cleaning'}</b><br><select name="other_id" aria-label="Cleaning" style="margin-top:4px;max-width:100%" onchange="document.getElementById('match-other').checked=true">${more.map(c => `<option value="${c.id}">${h(prettyDate(c.date))}${c.status === 'paid' ? ' · paid' : c.status === 'completed' ? ' · cleaned' : ''}</option>`).join('')}</select></span></label>` : '';
   return `<dialog id="match-dialog"><form method="post" action="/text-matches/${m.id}">
 <h2>${paid ? 'Which cleaning was paid?' : `Which cleaning is ${h(m.author)} talking about?`}</h2>
 <p class="muted">From the group text${all.length > 1 ? ` (1 of ${all.length})` : ''}, ${h(sent)}:</p>
 <blockquote style="white-space:pre-wrap;border-left:3px solid var(--line);margin:0 0 10px;padding:6px 12px"><b>${h(m.author)}:</b> ${h(m.body)}</blockquote>
-${rows || '<p class="muted">No cleanings around that date. If it was about one, add it on the calendar first.</p>'}
+${rows || (other ? '<p class="muted">No cleanings right around that date.</p>' : '<p class="muted">No cleanings around that date. If it was about one, add it on the calendar first.</p>')}${other}
 <div class="row" style="margin-top:10px"><label>Amount $ <input name="amount" type="number" min="1" step="0.01" value="${m.amount_cents != null ? (m.amount_cents / 100).toFixed(2) : ''}" style="width:110px" ${paid ? '' : 'placeholder="if she said"'}></label>
 ${paid ? `<select name="method" aria-label="How it was paid">${['Venmo', 'Zelle', 'Cash', 'Check', 'Other'].map(x => `<option ${x === m.method ? 'selected' : ''}>${x}</option>`).join('')}</select>` : ''}</div>
-<div class="dialog-actions">${rows ? `<button>${paid ? 'Mark paid' : 'Save'}</button>` : ''}<button class="ghost" name="skip" value="1">Not about a cleaning</button><button class="ghost" type="button" id="match-later">Ask me later</button></div>
+<div class="dialog-actions">${rows || other ? `<button>${paid ? 'Mark paid' : 'Save'}</button>` : ''}<button class="ghost" name="skip" value="1">Not about a cleaning</button><button class="ghost" type="button" id="match-later">Ask me later</button></div>
 <p class="muted" style="margin-bottom:0">${paid ? 'Tick every cleaning this payment covered.' : 'Saving marks it cleaned and, with an amount, records what she asked for.'}</p></form></dialog>
 <script>{const d=document.getElementById('match-dialog');document.getElementById('match-later').addEventListener('click',()=>d.close());d.showModal();}</script>`;
 }

@@ -1194,6 +1194,14 @@ test('Group payment texts: "done, $140" bills the cleaning, "paid" pays it, uncl
   r = say('Jenn', 'Done, it was $150');
   assert.ok(r.pending);
   assert.equal(app.textPay.pending().length, 1);
+  // A "done" text that names a coming cleaning's date ("Dec 4 cleaning is done") goes to it.
+  const plus = (n) => minus(-n);
+  const soon = mk(plus(7));
+  const [, sm, sd] = plus(7).split('-').map(Number);
+  const early = say('Jenn', `${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][sm - 1]} ${sd} cleaning is done`);
+  assert.equal(early.applied?.id, soon);
+  assert.equal(app.service.get(soon).status, 'completed');
+  assert.equal(app.textPay.pending().length, 1);
   await new Promise(res => app.server.listen(0, res));
   const base = `http://127.0.0.1:${app.server.address().port}`;
   const auth = { Authorization: 'Basic ' + Buffer.from('x:pw').toString('base64') };
@@ -1205,6 +1213,15 @@ test('Group payment texts: "done, $140" bills the cleaning, "paid" pays it, uncl
     assert.equal(post.status, 303);
     assert.equal(app.service.get(a).amount_cents, 15000);
     assert.equal(app.textPay.pending().length, 0);
+    // Any cleaning can be picked under "Another cleaning", e.g. one far ahead she misdated.
+    const far = mk(plus(40));
+    const odd = say('Danielle', 'Paid $95 on Venmo').pending;
+    assert.ok(odd);
+    const dlg = await (await fetch(base + '/', { headers: auth })).text();
+    assert.match(dlg, new RegExp(`<option value="${far}">`));
+    await fetch(`${base}/text-matches/${odd.id}`, { method: 'POST', headers: auth, body: new URLSearchParams({ cleaning_id: 'other', other_id: String(far), method: 'Venmo' }), redirect: 'manual' });
+    assert.equal(app.service.get(far).status, 'paid');
+    assert.equal(app.service.get(far).amount_cents, 9500);
 
     // Photos shared in from Messages: held, then saved to the picked cleaning, then a guest link.
     const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(200, 1)]);
