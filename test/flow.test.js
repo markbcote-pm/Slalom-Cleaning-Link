@@ -1227,3 +1227,26 @@ test('Group payment texts: "done, $140" bills the cleaning, "paid" pays it, uncl
     assert.equal((await fetch(`${base}/p/${'0'.repeat(24)}`)).status, 404);
   } finally { app.server.close(); app.stop?.(); }
 });
+
+test('Delete a hand-added cleaning completely; Airbnb cleanings cannot be deleted', async () => {
+  const { app } = setup();
+  await new Promise(r => app.server.listen(0, r));
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const auth = { Authorization: 'Basic ' + Buffer.from('x:pw').toString('base64') };
+  try {
+    const mk = (source) => Number(app.db.prepare(`INSERT INTO cleanings (source, date, status, booking_uid, created_at, updated_at) VALUES (?, '2027-02-10', 'approved', ?, 'x', 'x')`).run(source, source === 'airbnb' ? 'u1' : null).lastInsertRowid);
+    const hand = mk('manual'), air = mk('airbnb');
+    app.service.logEvent(hand, 'Approved', 'by Mark');
+    const note = app.notes.add({ body: 'test note', author: 'Mark', cleaningId: hand });
+    assert.match(await (await fetch(`${base}/cleanings/${hand}`, { headers: auth })).text(), /Delete cleaning/);
+    assert.doesNotMatch(await (await fetch(`${base}/cleanings/${air}`, { headers: auth })).text(), /Delete cleaning/);
+    const r = await fetch(`${base}/cleanings/${hand}/delete`, { method: 'POST', headers: auth, redirect: 'manual' });
+    assert.match(decodeURIComponent(r.headers.get('location')), /Deleted the/);
+    assert.equal(app.service.get(hand), undefined);
+    assert.equal(app.db.prepare('SELECT COUNT(*) n FROM events WHERE cleaning_id = ?').get(hand).n, 0);
+    assert.equal(app.db.prepare('SELECT cleaning_id FROM notes WHERE id = ?').get(note.id).cleaning_id, null);
+    assert.equal(app.db.prepare("SELECT COUNT(*) n FROM outbox").get().n, 0);   // nothing texted
+    await fetch(`${base}/cleanings/${air}/delete`, { method: 'POST', headers: auth, redirect: 'manual' });
+    assert.ok(app.service.get(air));
+  } finally { app.server.close(); app.stop?.(); }
+});

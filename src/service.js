@@ -213,6 +213,23 @@ export function createService({ db, config, notifier }) {
     return { message: db.prepare('SELECT * FROM group_messages WHERE id = ?').get(m.id) };
   }
 
+  // Delete a cleaning added by hand (e.g. a test) as if it never existed: no group text, and
+  // it leaves the payment records. Notes and receipts stay but are no longer tied to it.
+  // Airbnb and personal-stay cleanings can't be deleted (Airbnb would add them back): use
+  // "Not needed" or remove the personal stay instead.
+  function remove(id) {
+    const c = get(id);
+    if (!c) return { error: 'Cleaning not found.' };
+    if (c.source !== 'manual') return { error: 'Only cleanings added by hand can be deleted. For an Airbnb one, mark it "Not needed".' };
+    tx(db, () => {
+      db.prepare('DELETE FROM events WHERE cleaning_id = ?').run(id);
+      db.prepare('DELETE FROM group_messages WHERE cleaning_id = ?').run(id);
+      for (const t of ['notes', 'todos', 'receipts']) db.prepare(`UPDATE ${t} SET cleaning_id = NULL WHERE cleaning_id = ?`).run(id);
+      db.prepare('DELETE FROM cleanings WHERE id = ?').run(id);
+    });
+    return { deleted: c };
+  }
+
   // ---- Changes made by hand on the dashboard ----------------------------------------
 
   // The stays on either side of a date: the one that checked out on or before it, and the
@@ -531,7 +548,7 @@ export function createService({ db, config, notifier }) {
   }
 
   return {
-    get, list, stageOf, describe, windowFor, cleaningInWindow, addPersonalStay, updatePersonalStay, removePersonalStay, requestApproval, approve, approveProposal, dropCoveredProposals, decline, decideGroupMessage, unsendGroupMessage, testGroupMessage, undoSkip, restoreDeclined, addManual, move, cancel,
+    get, list, stageOf, describe, windowFor, cleaningInWindow, addPersonalStay, updatePersonalStay, removePersonalStay, requestApproval, approve, approveProposal, dropCoveredProposals, decline, decideGroupMessage, unsendGroupMessage, remove, testGroupMessage, undoSkip, restoreDeclined, addManual, move, cancel,
     customGroupMessage, confirmByCleaner, cleanerReply, mentionedDates, autoComplete, recordPaymentRequest, markPaid, unmarkPaid, markCleaned, logEvent, update,
   };
 }
