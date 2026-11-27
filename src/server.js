@@ -16,6 +16,7 @@ import { createFinance, financeRoutes, readForm, sniff } from './finance.js';
 import { createTextPay } from './textpay.js';
 import { createPhotos } from './photos.js';
 import { createPhoneInbox, inboundFields } from './phone.js';
+import { cleanerPage, cleanerFeed, checkCleanerKey, resetCleanerKey } from './cleanerview.js';
 import { liveStamp } from './live.js';
 import { smsInfoPage, privacyPage, termsPage, confirmationText, joinPage } from './policy.js';
 
@@ -195,6 +196,14 @@ export function createApp(config, deps = {}) {
       if (!config.feedToken || !(safeEq(given, config.feedId) || safeEq(given, config.feedToken))) return send(res, 404, 'Not found', 'text/plain');
       const only = ['stays', 'cleanings'].includes(url.searchParams.get('only')) ? url.searchParams.get('only') : '';
       return send(res, 200, cleaningFeed({ db, config, service, only }), 'text/calendar; charset=utf-8');
+    }
+
+    // The cleaner's private page and calendar (secret link, no login; reset from More)
+    m = p.match(/^\/c\/([A-Za-z0-9_-]+)(\.ics)?$/);
+    if (m && req.method === 'GET') {
+      if (!checkCleanerKey(db, m[1])) return send(res, 404, messagePage('Link expired', 'This link has been replaced. Ask Mark for the new one.'));
+      if (m[2]) return send(res, 200, cleanerFeed({ db, config, service }), 'text/calendar; charset=utf-8');
+      return send(res, 200, cleanerPage({ db, config, base: config.baseUrl || '' }));
     }
 
     // Approval links sent by text/email
@@ -442,6 +451,7 @@ export function createApp(config, deps = {}) {
       const year = /^\d{4}$/.test(url.searchParams.get('year') || '') ? url.searchParams.get('year') : todayIn(config.timezone).slice(0, 4);
       return send(res, 200, paymentsCsv(db, config, year), 'text/csv; charset=utf-8', { 'Content-Disposition': `attachment; filename="cleaning-payments-${year}.csv"` });
     }
+    if (req.method === 'POST' && p === '/cleaner-link/reset') { resetCleanerKey(db); return redirect(res, '/more?flash=' + encodeURIComponent(`New link made. The old one no longer works, so send ${config.cleaner?.name || 'the cleaner'} the new one.`) + '#cleaner-link'); }
     if (req.method === 'GET' && p === '/more') return send(res, 200, morePage({ config, db, who, flash: url.searchParams.get('flash'), push, phoneInbox }));
     if (req.method === 'GET' && p === '/todos') return send(res, 200, todosPage({ config, db, who }));
     m = p.match(/^\/cleanings\/(\d+)$/);
