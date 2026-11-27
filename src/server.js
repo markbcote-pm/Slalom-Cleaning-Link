@@ -422,7 +422,7 @@ export function createApp(config, deps = {}) {
     m = p.match(/^\/text-matches\/(\d+)$/);
     if (m && req.method === 'POST') {
       const body = await readBody(req);
-      const r = textPay.resolve(Number(m[1]), { cleaningIds: body.get('skip') === '1' ? [] : body.getAll('cleaning_id').map(Number).filter(id => service.get(id)),
+      const r = textPay.resolve(Number(m[1]), { cleaningIds: body.get('skip') === '1' ? [] : [...new Set(body.getAll('cleaning_id').map(v => Number(v === 'other' ? body.get('other_id') : v)))].filter(id => service.get(id)),
         amount: body.get('amount'), method: body.get('method'), by: who || 'Owner' });
       const msg = r.error || (r.dismissed ? 'OK, that text is not about a cleaning.' : 'Saved to the tracker.');
       return redirect(res, '/?flash=' + encodeURIComponent(msg));

@@ -1213,6 +1213,15 @@ test('Group payment texts: "done, $140" bills the cleaning, "paid" pays it, uncl
     assert.equal(post.status, 303);
     assert.equal(app.service.get(a).amount_cents, 15000);
     assert.equal(app.textPay.pending().length, 0);
+    // Any cleaning can be picked under "Another cleaning", e.g. one far ahead she misdated.
+    const far = mk(plus(40));
+    const odd = say('Danielle', 'Paid $95 on Venmo').pending;
+    assert.ok(odd);
+    const dlg = await (await fetch(base + '/', { headers: auth })).text();
+    assert.match(dlg, new RegExp(`<option value="${far}">`));
+    await fetch(`${base}/text-matches/${odd.id}`, { method: 'POST', headers: auth, body: new URLSearchParams({ cleaning_id: 'other', other_id: String(far), method: 'Venmo' }), redirect: 'manual' });
+    assert.equal(app.service.get(far).status, 'paid');
+    assert.equal(app.service.get(far).amount_cents, 9500);
 
     // Photos shared in from Messages: held, then saved to the picked cleaning, then a guest link.
     const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(200, 1)]);

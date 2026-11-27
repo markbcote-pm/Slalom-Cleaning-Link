@@ -125,6 +125,13 @@ export function createTextPay({ db, config, service, onUnclear = () => {}, onCle
     return rows;
   }
 
+  // Every other cleaning from the last few months and the next two, for "Another cleaning".
+  function others(m, exclude = []) {
+    const day = todayIn(config.timezone, new Date(m.at));
+    return db.prepare(`SELECT * FROM cleanings WHERE ${live} AND date >= ? AND date <= ? ORDER BY date DESC`).all(addDays(day, -120), addDays(day, 60))
+      .filter(c => !exclude.includes(c.id));
+  }
+
   // Mark picked the cleaning(s) in the dialog (or said it isn't about one).
   function resolve(id, { cleaningIds = [], amount = null, method = null, by }) {
     const m = get(id);
@@ -149,5 +156,5 @@ export function createTextPay({ db, config, service, onUnclear = () => {}, onCle
     return { applied: cleaningIds.map(cid => service.get(cid)) };
   }
 
-  return { handle, pending, candidates, resolve, get, money };
+  return { handle, pending, candidates, others, resolve, get, money };
 }
