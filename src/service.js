@@ -463,7 +463,10 @@ export function createService({ db, config, notifier }) {
     return r;
   }
 
+  // Phones type curly apostrophes ("can’t"); read them as straight ones so "can’t" isn't "I can".
+  const plain = (s) => String(s ?? '').replace(/[\u2018\u2019\u02BC\u2032`´]/g, "'");
   function cleanerReply({ body, phone = null, author = null }) {
+    body = plain(body);
     if (isCleaner(phone, author) && !saysYes(body) && offersOtherDay(body)) {
       const s = cleanerSuggestion(body);
       if (s) return { confirmed: [], suggestion: s };

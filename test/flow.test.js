@@ -1387,6 +1387,13 @@ test('cleaner says no and offers another day: moved if it fits between stays, el
   // Nothing was texted to the group.
   assert.equal(app.db.prepare("SELECT COUNT(*) n FROM outbox").get().n, 0);
   assert.equal(app.db.prepare("SELECT COUNT(*) n FROM group_messages WHERE status='pending'").get().n, 0);
+  // Phones type a curly apostrophe: "can’t" is still can't, not "I can" (a yes).
+  const id2 = Number(app.db.prepare("INSERT INTO cleanings (source, date, status, group_known_date, created_at, updated_at) VALUES ('manual', ?, 'approved', ?, 'x', 'x')").run(plus(16), plus(16)).lastInsertRowid);
+  book('c', plus(20), plus(22));
+  r = app.service.cleanerReply({ body: `I can’t do the ${+plus(16).slice(8)}th, how about the day after`, author: 'Rosa' });
+  assert.deepEqual(r.confirmed, []);
+  assert.equal(r.suggestion?.moved, true);
+  assert.equal(app.service.get(id2).date, plus(17));
   // Friendly texts that happen to have "no"/"can't" and a day aren't suggestions.
   assert.equal(app.service.cleanerReply({ body: `No problem, see you ${md(plus(13))}!`, author: 'Rosa' }).suggestion, undefined);
   assert.equal(app.service.cleanerReply({ body: `Can't wait, ${md(plus(13))} it is`, author: 'Rosa' }).suggestion, undefined);
