@@ -1250,3 +1250,57 @@ test('Delete a hand-added cleaning completely; Airbnb cleanings cannot be delete
     assert.ok(app.service.get(air));
   } finally { app.server.close(); app.stop?.(); }
 });
+
+test('Phone inbox: a notification carrying several lines saves each new line once', async () => {
+  const config = loadConfig({ DOTENV: '0', DB_FILE: ':memory:', DRY_RUN: '1', ADMIN_PASSWORD: 'pw', FEED_TOKEN: 'feedtok',
+    APPROVERS: 'Mark:+15550000001', CLEANER: 'Jen:+15550000003', GROUP_MODE: 'phone', PHONE_ALIASES: 'Jen=MC iPhone', BASE_URL: 'http://test', TIMEZONE: 'America/Los_Angeles' });
+  const app = createApp(config);
+  try {
+    let r = app.phoneInbox.receive({ title: 'MC iPhone', text: 'yes I can do that one' });
+    assert.equal(r.author, 'Jen');
+    // The second text updates the same notification, which now holds both lines.
+    r = app.phoneInbox.receive({ title: 'MC iPhone', text: 'yes I can do that one\nAll done! $10' });
+    assert.equal(r.savedLines, 1);
+    assert.deepEqual(app.db.prepare('SELECT body FROM notes ORDER BY id').all().map(n => n.body), ['yes I can do that one', 'All done! $10']);
+    r = app.phoneInbox.receive({ title: 'MC iPhone', text: '2 new messages' });
+    assert.equal(r.saved, false);
+  } finally { app.stop?.(); }
+});
+
+test('A group text shared into the app by hand is handled like a forwarded one', async () => {
+  const config = loadConfig({ DOTENV: '0', DB_FILE: ':memory:', DRY_RUN: '1', ADMIN_PASSWORD: 'pw', FEED_TOKEN: 'feedtok',
+    APPROVERS: 'Mark:+15550000001', CLEANER: 'Jen:+15550000003', GROUP_MODE: 'phone', BASE_URL: 'http://test', TIMEZONE: 'America/Los_Angeles' });
+  const app = createApp(config);
+  await new Promise(r => app.server.listen(0, r));
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const auth = { Authorization: 'Basic ' + Buffer.from('x:pw').toString('base64') };
+  try {
+    const fd = new FormData(); fd.append('text', 'All done! $120');
+    const r = await fetch(base + '/share-photos', { method: 'POST', body: fd, redirect: 'manual' });
+    assert.match(r.headers.get('location'), /^\/share-text\?text=All%20done/);
+    const page = await (await fetch(base + r.headers.get('location'), { headers: auth })).text();
+    assert.match(page, /value="Jen" checked/);
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    const id = Number(app.db.prepare(`INSERT INTO cleanings (source, date, status, created_at, updated_at) VALUES ('manual', ?, 'approved', 'x', 'x')`).run(today).lastInsertRowid);
+    await fetch(base + '/share-text', { method: 'POST', headers: auth, body: new URLSearchParams({ body: 'All done! $120', author: 'Jen' }), redirect: 'manual' });
+    assert.equal(app.service.get(id).amount_cents, 12000);
+    assert.equal(app.db.prepare('SELECT author FROM notes').get().author, 'Jen');
+  } finally { app.server.close(); app.stop?.(); }
+});
+
+test('A confirmed cleaning can be put back to waiting on the cleaner from its page', async () => {
+  const { app } = setup();
+  await new Promise(r => app.server.listen(0, r));
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const auth = { Authorization: 'Basic ' + Buffer.from('x:pw').toString('base64') };
+  try {
+    const id = Number(app.db.prepare(`INSERT INTO cleanings (source, date, status, group_known_date, cleaner_confirmed_at, created_at, updated_at) VALUES ('manual', '2027-03-10', 'approved', '2027-03-10', 'x', 'x', 'x')`).run().lastInsertRowid);
+    const page = await (await fetch(`${base}/cleanings/${id}`, { headers: auth })).text();
+    assert.match(page, /data-open="confirm-dialog">✓ Cleaner confirmed/);
+    assert.match(page, /action="\/cleanings\/\d+\/unconfirm"/);
+    await fetch(`${base}/cleanings/${id}/unconfirm`, { method: 'POST', headers: auth, redirect: 'manual' });
+    assert.equal(app.service.get(id).cleaner_confirmed_at, null);
+    assert.equal(app.db.prepare('SELECT COUNT(*) n FROM outbox').get().n, 0);
+    assert.match(await (await fetch(`${base}/cleanings/${id}`, { headers: auth })).text(), /action="\/cleanings\/\d+\/confirm"/);
+  } finally { app.server.close(); app.stop?.(); }
+});

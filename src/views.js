@@ -475,7 +475,7 @@ function stateBanner(c, config) {
 const STEP_LABEL = { 'Payment requested': 'Price quoted' };
 function stepPills(c, service, config, who) {
   const live = !['cancelled', 'declined', 'awaiting_approval'].includes(c.status);
-  const tap = { 'Cleaner confirmed': live && c.group_known_date === c.date && !['completed', 'paid'].includes(c.status) ? 'confirm-dialog' : null,
+  const tap = { 'Cleaner confirmed': live && (c.group_known_date === c.date || c.cleaner_confirmed_at) && !['completed', 'paid'].includes(c.status) ? 'confirm-dialog' : null,
     Cleaned: live ? 'cleaned-dialog' : null, 'Payment requested': live ? 'quote-dialog' : null, Paid: live ? 'paid-dialog' : null };
   const pills = service.stageOf(c).map(s => {
     const label = h(STEP_LABEL[s.name] || s.name);
@@ -489,8 +489,11 @@ function stepPills(c, service, config, who) {
   const methods = ['Venmo', 'Zelle', 'Cash', 'Check', 'Other'].map(m => `<option ${m === c.paid_method ? 'selected' : ''}>${m}</option>`).join('');
   const close = '<button type="button" class="ghost" data-close>Cancel</button>';
   return `<div class="stages">${pills}</div>${live ? '<p class="muted" style="font-size:12px;margin:4px 0 0">Tap a step to mark it done.</p>' : ''}
-<dialog id="confirm-dialog"><form method="post" action="/cleanings/${c.id}/confirm"><h2>${cleaner} confirmed?</h2><p>Mark that ${cleaner} said yes to ${h(prettyDate(c.date))}.</p>
-<div class="dialog-actions"><button>Yes, ${cleaner} confirmed</button>${close}</div></form></dialog>
+${c.cleaner_confirmed_at
+  ? `<dialog id="confirm-dialog"><form method="post" action="/cleanings/${c.id}/unconfirm"><h2>Undo ${cleaner}'s confirmation?</h2><p>${h(prettyDate(c.date))} goes back to waiting on ${cleaner}. Nothing is texted to the group.</p>
+<div class="dialog-actions"><button class="danger">Yes, not confirmed</button>${close}</div></form></dialog>`
+  : `<dialog id="confirm-dialog"><form method="post" action="/cleanings/${c.id}/confirm"><h2>${cleaner} confirmed?</h2><p>Mark that ${cleaner} said yes to ${h(prettyDate(c.date))}.</p>
+<div class="dialog-actions"><button>Yes, ${cleaner} confirmed</button>${close}</div></form></dialog>`}
 <dialog id="cleaned-dialog"><form method="post" action="/cleanings/${c.id}/cleaned"><h2>${done ? 'Cleaned' : 'Mark as cleaned?'}</h2>
 <p>${done ? `${h(prettyDate(c.date))} is marked as cleaned.` : `Mark the ${h(prettyDate(c.date))} cleaning as done.`}${c.date > today && !done ? ' <span class="warn">This date is still ahead.</span>' : ''}</p>
 <div class="dialog-actions">${done ? (c.status === 'paid' ? '<p class="muted">Already paid, so this can\'t be undone here. Undo the payment first.</p>' : '<button name="yes" value="0" class="ghost">Not cleaned yet (undo)</button>') : '<button name="yes" value="1">Yes, it\'s cleaned</button>'}${close}</div></form></dialog>
@@ -706,6 +709,18 @@ ${paid ? `<select name="method" aria-label="How it was paid">${['Venmo', 'Zelle'
 }
 
 // After sharing photos into the app: which cleaning are they from?
+// A text message shared into the app from Messages: who wrote it?
+export function shareTextPage({ config, db, who, text }) {
+  const people = config.groupMembers;
+  const guess = config.cleaner?.name || people[0]?.name;
+  return layout('Save a group text', `${header({ config, db, who, active: 'notes' })}
+<div class="card"><h2>Save a text from the group</h2>
+<form method="post" action="/share-text"><textarea name="body" style="min-height:90px" aria-label="Message">${h(text)}</textarea>
+<p>Who sent it?</p>${people.map(p => `<label class="pick"><input type="radio" name="author" value="${h(p.name)}" ${p.name === guess ? 'checked' : ''}><span><b>${h(p.name)}</b></span></label>`).join('')}
+<div class="dialog-actions"><button>Save</button><a class="btn ghost" href="/notes">Cancel</a></div></form>
+<p class="muted">It's handled like a forwarded text: saved to Notes, a "yes" from ${h(config.cleaner?.name || 'the cleaner')} confirms the cleaning, and "done, $X" or "paid" updates payments.</p></div>`);
+}
+
 export function shareInPage({ config, db, who, token, count, likely, cleanings }) {
   const stayBefore = (date) => db.prepare("SELECT * FROM bookings WHERE status='active' AND check_out <= ? ORDER BY check_out DESC LIMIT 1").get(date);
   const thumbs = Array.from({ length: Math.min(count, 12) }, (_, i) => `<img class="thumb" src="/share-photos/${token}/${i}" alt="" loading="lazy">`).join('');
