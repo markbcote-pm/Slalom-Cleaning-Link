@@ -33,7 +33,11 @@ function whoIs(config, label) {
   if (!label) return null;
   if (digits(label).length === 10) return people(config).find(p => p.phone && digits(p.phone) === digits(label)) || null;
   const hits = people(config).filter(p => p.names.some(n => hasName(label, n)));
-  return hits.length === 1 ? hits[0] : null;
+  if (hits.length) return hits.length === 1 ? hits[0] : null;
+  // A short name in the app, a full one in the phone's contacts: "Jen" is "Jennifer Patterson".
+  const first = String(label).trim().split(/\s+/)[0].toLowerCase();
+  const loose = people(config).filter(p => p.names.some(n => n.length >= 3 && !n.includes(' ') && first.startsWith(n)));
+  return loose.length === 1 ? loose[0] : null;
 }
 
 // Messages' own status notifications, not texts from anyone.

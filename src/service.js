@@ -382,11 +382,17 @@ export function createService({ db, config, notifier }) {
     if (phone && c.phone && digits(phone) === digits(c.phone)) return true;
     return !!author && author.trim().toLowerCase() === c.name.trim().toLowerCase();
   }
+  // Lots of the group chat isn't about dates at all (wifi, supplies, renters, "Sure. I missed some
+  // shampoo..."), so a yes has to be short ("Yes", "Sure!", "Got it, thanks") unless it says so
+  // outright ("Both dates are confirmed", "that works for me").
   function saysYes(text) {
-    const t = String(text || '').toLowerCase().trim();
-    if (/\b(no|nope|not|can'?t|cannot|won'?t|unable|sorry|maybe|unless|wait)\b/.test(t) || t.includes('?')) return false;
-    return /^(yes|yes!|yep|yeah|yup|ya|y|sure|ok|okay|k|confirmed?|sounds good|will do|i can|can do|works|that works|got it|perfect|great|absolutely|definitely)\b/.test(t)
-      || /^(👍|✅|👌)/u.test(t) || /\b(i'?ll be there|see you then|i'?m in)\b/.test(t);
+    const t = String(text || '').toLowerCase().replace(/[‘’]/g, "'").trim();
+    const u = t.replace(/\bcan'?t wait\b/g, '');
+    if (/\b(no|nope|not|can'?t|cannot|won'?t|unable|sorry|maybe|unless|wait|\w+n't)\b/.test(u) || t.includes('?')) return false;
+    const words = t.split(/\s+/).filter(Boolean).length;
+    if (/\b(confirm(?:ed|s)?|works for me|that works|i can do (?:it|that|those|both|them)|i'?ll be there|see you then|i'?m in|count me in|both (?:dates|days) (?:are|work))\b/.test(t)) return true;
+    return (words <= 7 && /^(yes|yes!|yep|yeah|yup|ya|y|sure|ok|okay|k|sounds good|will do|i can|can do|works|got it|perfect|great|absolutely|definitely)\b/.test(t))
+      || (words <= 3 && /^(👍|✅|👌)/u.test(t));
   }
   function mentionedDates(text, dates) {
     const t = ordinalWords(String(text || '').replace(/[\u2018\u2019\u02BC]/g, "'")).toLowerCase();
@@ -495,7 +501,8 @@ export function createService({ db, config, notifier }) {
     // cleaning is waiting on her answer and the day fits; it's only a quiet move, never a warning.
     if (isCleaner(phone, author) && (saysYes(body) ? !/\b(both|all|each)\b/i.test(body) : true)) {
       const yes = saysYes(body), cue = !yes && offersOtherDay(body);
-      const s = cleanerSuggestion(body, { yes: yes || !cue, onlyWaiting: !yes && !cue });
+      const short = String(body).trim().split(/\s+/).length <= 4;
+      const s = (yes || cue || short) ? cleanerSuggestion(body, { yes: yes || !cue, onlyWaiting: !yes && !cue }) : null;
       if (s) return { confirmed: [], suggestion: s };
     }
     if (!isCleaner(phone, author) || !saysYes(body)) return { confirmed: [] };
@@ -662,6 +669,6 @@ export function createService({ db, config, notifier }) {
 
   return {
     get, list, stageOf, describe, windowFor, cleaningInWindow, addPersonalStay, updatePersonalStay, removePersonalStay, requestApproval, approve, approveProposal, dropCoveredProposals, decline, decideGroupMessage, unsendGroupMessage, remove, testGroupMessage, undoSkip, restoreDeclined, addManual, move, cancel,
-    customGroupMessage, confirmByCleaner, cleanerReply, mentionedDates, datesIn, hooks, autoComplete, recordPaymentRequest, markPaid, unmarkPaid, markCleaned, logEvent, update,
+    customGroupMessage, confirmByCleaner, cleanerReply, saysYes, mentionedDates, datesIn, hooks, autoComplete, recordPaymentRequest, markPaid, unmarkPaid, markCleaned, logEvent, update,
   };
 }
