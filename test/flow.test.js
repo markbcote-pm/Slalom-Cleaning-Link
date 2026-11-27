@@ -1287,3 +1287,20 @@ test('A group text shared into the app by hand is handled like a forwarded one',
     assert.equal(app.db.prepare('SELECT author FROM notes').get().author, 'Jen');
   } finally { app.server.close(); app.stop?.(); }
 });
+
+test('A confirmed cleaning can be put back to waiting on the cleaner from its page', async () => {
+  const { app } = setup();
+  await new Promise(r => app.server.listen(0, r));
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const auth = { Authorization: 'Basic ' + Buffer.from('x:pw').toString('base64') };
+  try {
+    const id = Number(app.db.prepare(`INSERT INTO cleanings (source, date, status, group_known_date, cleaner_confirmed_at, created_at, updated_at) VALUES ('manual', '2027-03-10', 'approved', '2027-03-10', 'x', 'x', 'x')`).run().lastInsertRowid);
+    const page = await (await fetch(`${base}/cleanings/${id}`, { headers: auth })).text();
+    assert.match(page, /data-open="confirm-dialog">✓ Cleaner confirmed/);
+    assert.match(page, /action="\/cleanings\/\d+\/unconfirm"/);
+    await fetch(`${base}/cleanings/${id}/unconfirm`, { method: 'POST', headers: auth, redirect: 'manual' });
+    assert.equal(app.service.get(id).cleaner_confirmed_at, null);
+    assert.equal(app.db.prepare('SELECT COUNT(*) n FROM outbox').get().n, 0);
+    assert.match(await (await fetch(`${base}/cleanings/${id}`, { headers: auth })).text(), /action="\/cleanings\/\d+\/confirm"/);
+  } finally { app.server.close(); app.stop?.(); }
+});
