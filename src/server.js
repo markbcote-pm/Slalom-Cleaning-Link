@@ -9,13 +9,15 @@ import { createService } from './service.js';
 import { syncAirbnb } from './sync.js';
 import { cleaningFeed } from './feed.js';
 import { isDate, todayIn, prettyDate, localToUtc } from './dates.js';
-import { layout, messagePage, approvalPage, groupDecisionPage, dashboard, notesPage, todosPage, cleaningPage, inboxPage, staysPage, paymentsCsv, morePage, loginPage, shareInPage, shareTextPage, guestPhotosPage } from './views.js';
+import { guestLabel, header, layout, messagePage, approvalPage, groupDecisionPage, dashboard, notesPage, todosPage, cleaningPage, inboxPage, staysPage, paymentsCsv, morePage, loginPage, shareInPage, shareTextPage, guestPhotosPage } from './views.js';
 import { createNotes, validTwilioSignature } from './notes.js';
 import { createPush, SERVICE_WORKER } from './push.js';
 import { createFinance, financeRoutes, readForm, sniff } from './finance.js';
 import { createTextPay } from './textpay.js';
 import { createPhotos } from './photos.js';
 import { createPhoneInbox, inboundFields } from './phone.js';
+import { guestMessagesPage, guestMessagePage, saveGuestSettings, dueGuestAlerts, markGuestAlert } from './guestmsgs.js';
+import { forecast } from './weather.js';
 import { cleanerPage, cleanerFeed, checkCleanerKey, resetCleanerKey } from './cleanerview.js';
 import { liveStamp } from './live.js';
 import { smsInfoPage, privacyPage, termsPage, confirmationText, joinPage } from './policy.js';
@@ -445,6 +447,15 @@ export function createApp(config, deps = {}) {
       return send(res, 200, dashboard({ config, service, db, month, who, flash: url.searchParams.get('flash'), review: Number(url.searchParams.get('review')) || null, msg: url.searchParams.get('msg'), msgnote: url.searchParams.get('msgnote'), textPay }));
     }
     if (req.method === 'GET' && p === '/notes') return send(res, 200, notesPage({ config, db, who }));
+    if (req.method === 'GET' && p === '/guest-messages') return send(res, 200, guestMessagesPage({ db, config, layout, header: header({ config, db, who, active: 'guestmsgs' }), flash: url.searchParams.get('flash') || '', days: await forecast({ db, config, fetchImpl: deps.weatherFetch || deps.fetchImpl }) }));
+    m = req.method === 'GET' && p.match(/^\/guest-messages\/([^/]+)\/(in|out)$/);
+    if (m) {
+      let uid = m[1]; try { uid = decodeURIComponent(uid); } catch {}
+      const booking = db.prepare('SELECT * FROM bookings WHERE uid = ?').get(uid);
+      if (!booking) return redirect(res, '/guest-messages');
+      return send(res, 200, guestMessagePage({ db, config, layout, header: header({ config, db, who, active: 'guestmsgs' }), booking, which: m[2], days: await forecast({ db, config, fetchImpl: deps.weatherFetch || deps.fetchImpl }) }));
+    }
+    if (req.method === 'POST' && p === '/guest-messages') { saveGuestSettings(db, await readBody(req)); return redirect(res, '/guest-messages?flash=' + encodeURIComponent('Saved.')); }
     if (req.method === 'GET' && p === '/inbox') return send(res, 200, inboxPage({ config, service, db, who }));
     if (req.method === 'GET' && p === '/stays') return send(res, 200, staysPage({ config, service, db, who, flash: url.searchParams.get('flash') }));
     if (req.method === 'GET' && p === '/payments.csv') {
@@ -657,19 +668,57 @@ export function createApp(config, deps = {}) {
     handle(req, res).catch(err => { console.error(err); if (!res.headersSent) send(res, 500, layout('Error', '<p>Something went wrong.</p>')); });
   });
 
+  // A stay arriving within 2 weeks with no approved cleaning before it: one push and one text
+  // to Mark and Danielle per stay (again only if its arrival date changes). From 9 AM local.
+  async function missingCleaningAlert(now = new Date()) {
+    const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: config.timezone, hour: 'numeric', hourCycle: 'h23' }).format(now));
+    if (hour < 9) return { skipped: 'before 9 AM' };
+    const alerted = [];
+    for (const it of service.missingApproved(todayIn(config.timezone, now))) {
+      const key = `alert:missing:${it.booking.uid}:${it.booking.check_in}`;
+      if (db.prepare('SELECT 1 FROM meta WHERE key = ?').get(key)) continue;
+      db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)").run(key, now.toISOString());
+      const what = it.proposed ? `The ${prettyDate(it.proposed.date)} cleaning still needs your OK.` : 'No cleaning is scheduled.';
+      const url = it.proposed ? `/?month=${it.proposed.date.slice(0, 7)}&review=${it.proposed.id}` : `/?month=${it.booking.check_in.slice(0, 7)}`;
+      const text = `${guestLabel(it.booking)} arrives ${prettyDate(it.booking.check_in)} (${it.days} day${it.days === 1 ? '' : 's'} away). ${what}`;
+      try { await push.send({ title: 'Cleaning not approved', body: text, url }); } catch (e) { console.error('Push failed:', e.message); }
+      await notifier.approvers('Cleaning not approved', () => `Cleaning heads-up: ${text} ${(config.baseUrl || '') + url}`);
+      alerted.push(it.booking.uid);
+    }
+    return { alerted };
+  }
+
+  // Time to send a guest their check-in (9 AM arrival day) or check-out (6 PM the night before)
+  // message: a push that opens it ready to copy, and a short text with the link.
+  async function guestMessageAlerts(now = new Date()) {
+    const sent = [];
+    for (const a of dueGuestAlerts(db, config, now)) {
+      markGuestAlert(db, a, now);
+      const who = a.booking.guest_name || guestLabel(a.booking);
+      const kind = a.which === 'in' ? 'check-in' : 'check-out';
+      const url = `/guest-messages/${encodeURIComponent(a.booking.uid)}/${a.which}`;
+      try { await push.send({ title: `Send ${who} their ${kind} message`, body: 'Tap to copy it, then paste it into Airbnb.', url }); } catch (e) { console.error('Push failed:', e.message); }
+      await notifier.approvers(`${kind} message`, () => `Time to send ${who} their ${kind} message. Copy it here: ${(config.baseUrl || '') + url}`);
+      sent.push(`${a.which}:${a.booking.uid}`);
+    }
+    return { sent };
+  }
+
   let timer = null;
   function startBackground() {
     const tick = async () => {
       try { const r = await sync(); if (!r.skipped) console.log('Airbnb sync', r); } catch (e) { console.error('Airbnb sync failed:', e.message); }
       try { await service.autoComplete(); } catch (e) { console.error('Auto-complete failed:', e.message); }
       try { const r = await push.dailyReminder(); if (r.sent) console.log('Push reminder', r.items.length); } catch (e) { console.error('Push reminder failed:', e.message); }
+      try { const r = await missingCleaningAlert(); if (r.alerted?.length) console.log('Missing cleaning alert', r.alerted); } catch (e) { console.error('Missing cleaning alert failed:', e.message); }
+      try { const r = await guestMessageAlerts(); if (r.sent.length) console.log('Guest message alerts', r.sent); } catch (e) { console.error('Guest message alert failed:', e.message); }
     };
     tick();
     timer = setInterval(tick, Math.max(5, config.syncMinutes) * 60 * 1000);
   }
   const stop = () => { clearInterval(timer); server.close(); };
 
-  return { server, db, service, notes, phoneInbox, textPay, photos, sync, notifier, push, fin, startBackground, stop };
+  return { server, db, service, notes, phoneInbox, textPay, photos, sync, notifier, push, fin, startBackground, stop, missingCleaningAlert, guestMessageAlerts };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

@@ -7,6 +7,7 @@ import { localToUtc } from '../src/dates.js';
 import { cleaningFeed } from '../src/feed.js';
 import { cleaningWindows, guestLabel, cleaningState } from '../src/views.js';
 import { cleanerKey } from '../src/cleanerview.js';
+import { fillMessage, guestSettings, dueGuestAlerts } from '../src/guestmsgs.js';
 
 const NOW = new Date('2026-11-01T18:00:00Z');
 
@@ -1657,5 +1658,101 @@ test("Jen's private link shows only the cleanings she was texted, with no login"
     await fetch(`${base}/cleaner-link/reset`, { method: 'POST', headers: auth, redirect: 'manual' });
     assert.equal((await fetch(`${base}/c/${key}`)).status, 404);
     assert.equal((await fetch(`${base}/c/${cleanerKey(app.db)}`)).status, 200);
+  } finally { app.stop(); }
+});
+
+test('A stay 2 weeks out with no approved cleaning: one push and one text to Mark and Danielle', async () => {
+  const { app, outbox, clearOutbox } = setup();
+  try {
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    const plus = (n) => { const d = new Date(today + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+    const at = new Date(plus(0) + 'T20:00:00Z');   // noon Pacific today
+    await app.sync({ icalText: airbnb([['a', plus(3), plus(6)], ['b', plus(10), plus(12)], ['c', plus(20), plus(22)]]), now: at });
+    clearOutbox();
+    // a->b turnover (b arrives in 10 days) has only a proposed cleaning: alert. c is 20 days out: not yet.
+    let r = await app.missingCleaningAlert(at);
+    assert.deepEqual(r.alerted, ['b']);
+    const texts = outbox().filter(m => m.channel === 'sms' && /Cleaning heads-up/.test(m.body));
+    assert.equal(texts.length, 2, 'Mark and Danielle');
+    assert.match(texts[0].body, /arrives .* \(10 days away\)\. The .* cleaning still needs your OK\./);
+    // Only once per stay.
+    r = await app.missingCleaningAlert(at);
+    assert.deepEqual(r.alerted, []);
+    // Once approved, a later stay is judged on its own; approving b's turnover clears it.
+    const c = app.db.prepare('SELECT * FROM cleanings WHERE date = ?').get(plus(6));
+    await app.service.approveProposal(c.id, 'Mark', { alreadyArranged: true });
+    assert.equal(app.service.missingApproved(today).length, 0);
+  } finally { app.stop(); }
+});
+
+test('Guest messages tab fills in check-in and check-out messages for each stay', async () => {
+  const { app: plain } = setup(); plain.stop();
+  const app = createApp(plain.config ?? loadConfig({ DOTENV: '0', DB_FILE: ':memory:', DRY_RUN: '1', ADMIN_PASSWORD: 'pw', FEED_TOKEN: 'feedtok', CLEANING_FEE: '120',
+    APPROVERS: 'Mark:+15550000001:mark@example.com,Danielle:+15550000002:', CLEANER: 'Rosa:+15550000003', BASE_URL: 'http://test', TIMEZONE: 'America/Los_Angeles' }),
+    { weatherFetch: async () => { throw new Error('offline'); } });
+  await new Promise(r => app.server.listen(0, r));
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const auth = { Authorization: 'Basic ' + Buffer.from('x:pw').toString('base64') };
+  try {
+    // A stay starting next Tuesday, checking out the Sunday after.
+    const t = new Date(new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }) + 'T12:00:00Z');
+    t.setUTCDate(t.getUTCDate() + ((2 - t.getUTCDay() + 7) % 7 || 7));
+    const inD = t.toISOString().slice(0, 10); t.setUTCDate(t.getUTCDate() + 5); const outD = t.toISOString().slice(0, 10);
+    const long = (d) => { const x = new Date(d + 'T12:00:00Z'), n = x.getUTCDate(); return `${x.toLocaleDateString('en-US', { month: 'long', timeZone: 'UTC' })} ${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th'}`; };
+    await app.sync({ icalText: airbnb([['s1', inD, outD]]), now: new Date() });
+    app.db.prepare("UPDATE bookings SET guest_name = 'John and Donna' WHERE uid = 's1'").run();
+    let page = await (await fetch(`${base}/guest-messages`, { headers: auth })).text();
+    assert.match(page, /Hey John and Donna, welcome/);
+    assert.ok(page.includes(`after 4:00 PM today, Tuesday ${long(inD)}`));
+    assert.ok(page.includes(`For checkout by 11:00 AM on Sunday ${long(outD)}`));
+    assert.match(page, /The code is \{lockbox code\}/, 'not filled in until saved');
+    assert.match(page, /Fill in Wifi name, Wifi password, Lockbox code/);
+    await fetch(`${base}/guest-messages`, { method: 'POST', headers: auth, redirect: 'manual',
+      body: new URLSearchParams({ 'wifi name': 'River', 'wifi password': 'pw123', 'lockbox code': '4321' }) });
+    page = await (await fetch(`${base}/guest-messages`, { headers: auth })).text();
+    assert.match(page, /Wifi: River \/ Password: pw123/);
+    assert.match(page, /The code is 4321\./);
+    assert.doesNotMatch(page, /Fill in/);
+    assert.match(page, /Guest messages/);
+  } finally { app.stop(); }
+});
+
+
+test('Guest messages are personalized: weather, snow, holiday, same-day turnover; alerts at 9 AM and 6 PM', async () => {
+  const { app } = setup();
+  try {
+    const config = { checkinTime: '13:00', checkoutTime: '11:00', timezone: 'America/Los_Angeles' };
+    app.db.prepare("INSERT INTO bookings (uid,check_in,check_out,status,first_seen,last_seen,guest_name) VALUES ('t','2026-11-24','2026-11-29','active','x','x','John and Donna'),('n','2026-11-29','2026-12-02','active','x','x',NULL),('j','2027-07-10','2027-07-12','active','x','x','Sam')").run();
+    const s = guestSettings(app.db);
+    const days = { '2026-11-24': { code: 0, hi: 45, lo: 20, snow: 0 }, '2026-11-26': { code: 73, hi: 30, lo: 15, snow: 6.2 }, '2026-11-29': { code: 71, hi: 31, lo: 18, snow: 2 } };
+    const b = app.db.prepare("SELECT * FROM bookings WHERE uid='t'").get();
+    const msgIn = fillMessage(s.checkin, { booking: b, config, details: { ...s.details, 'lockbox code': '1111' }, db: app.db, days, snow: s.snow });
+    assert.match(msgIn, /host you in Tahoe over the Thanksgiving holiday!/);
+    assert.match(msgIn, /check in anytime after 1:00 PM today, Tuesday November 24th\./);
+    assert.match(msgIn, /Weather: Tuesday looks sunny, with a high around 45°F and a low near 20°F\. Snow is in the forecast Thursday \(about 6 inches\), so plan for chains or 4WD\./);
+    assert.doesNotMatch(msgIn, /Sunday \(/, 'checkout day is not a stay day for the arrival line');
+    assert.match(msgIn, /\nSnow: If more than 4 inches/);
+    assert.match(msgIn, /The code is 1111\./);
+    assert.doesNotMatch(msgIn, /\n\n\n/);
+    const msgOut = fillMessage(s.checkout, { booking: b, config, details: s.details, db: app.db, days, snow: s.snow });
+    assert.match(msgOut, /Snow is forecast for Sunday \(about 2 inches\), so please leave extra time/);
+    assert.match(msgOut, /Our next guests arrive later that day, so we really appreciate you being out by 11:00 AM\./);
+    assert.match(msgOut, /For checkout by 11:00 AM on Sunday November 29th,/);
+    // A July stay with no forecast: Fourth of July only if it overlaps (it doesn't), no snow, no weather.
+    const j = app.db.prepare("SELECT * FROM bookings WHERE uid='j'").get();
+    const summer = fillMessage(s.checkin, { booking: j, config, details: s.details, db: app.db, days: null, snow: s.snow });
+    assert.match(summer, /host you in Tahoe! I hope/);
+    assert.doesNotMatch(summer, /Snow:|Weather:/);
+
+    // Alerts: 9 AM arrival day for check-in, 6 PM the night before for check-out, once each.
+    const cfg = { ...config };
+    const at = (iso) => new Date(iso);
+    assert.deepEqual(dueGuestAlerts(app.db, cfg, at('2026-11-24T16:30:00Z')).map(a => a.which + a.booking.uid), []);            // 8:30 AM
+    assert.deepEqual(dueGuestAlerts(app.db, cfg, at('2026-11-24T17:05:00Z')).map(a => a.which + a.booking.uid), ['int']);       // 9:05 AM
+    assert.deepEqual(dueGuestAlerts(app.db, cfg, at('2026-11-29T01:30:00Z')).map(a => a.which + a.booking.uid), []);            // Nov 28 5:30 PM
+    assert.deepEqual(dueGuestAlerts(app.db, cfg, at('2026-11-29T02:10:00Z')).map(a => a.which + a.booking.uid), ['outt']);      // Nov 28 6:10 PM
+    const r = await app.guestMessageAlerts(at('2026-11-24T17:05:00Z'));
+    assert.deepEqual(r.sent, ['in:t']);
+    assert.equal((await app.guestMessageAlerts(at('2026-11-24T17:35:00Z'))).sent.length, 0);
   } finally { app.stop(); }
 });

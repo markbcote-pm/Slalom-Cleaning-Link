@@ -227,6 +227,25 @@ export function createService({ db, config, notifier }) {
     return { message: db.prepare('SELECT * FROM group_messages WHERE id = ?').get(m.id) };
   }
 
+  // Stays arriving in the next 14 days whose turnover (previous checkout to check-in) has no
+  // approved cleaning: none at all, or only one still waiting for an OK. Personal stays and
+  // a first stay with nothing before it don't count.
+  function missingApproved(today, days = 14) {
+    const horizon = addDays(today, days);
+    const bookings = db.prepare("SELECT * FROM bookings WHERE status='active' ORDER BY check_in").all();
+    const out = [];
+    for (const b of bookings) {
+      if (b.source === 'personal' || b.check_in < today || b.check_in > horizon) continue;
+      const prev = db.prepare("SELECT check_out FROM bookings WHERE status='active' AND uid != ? AND check_out <= ? ORDER BY check_out DESC LIMIT 1").get(b.uid, b.check_in);
+      if (!prev) continue;
+      const inGap = db.prepare("SELECT * FROM cleanings WHERE status NOT IN ('cancelled','declined') AND date >= ? AND date <= ? ORDER BY date").all(prev.check_out, b.check_in);
+      if (inGap.some(c => c.status !== 'awaiting_approval')) continue;
+      const guest = b.guest_name || (b.source === 'personal' ? 'Personal stay' : 'Next guest');
+      out.push({ booking: b, guest, proposed: inGap[0] || null, days: Math.round((Date.parse(b.check_in) - Date.parse(today)) / 864e5) });
+    }
+    return out;
+  }
+
   // Delete a cleaning added by hand (e.g. a test) as if it never existed: no group text, and
   // it leaves the payment records. Notes and receipts stay but are no longer tied to it.
   // Airbnb and personal-stay cleanings can't be deleted (Airbnb would add them back): use
@@ -709,7 +728,7 @@ export function createService({ db, config, notifier }) {
   }
 
   return {
-    get, list, stageOf, describe, windowFor, cleaningInWindow, addPersonalStay, updatePersonalStay, removePersonalStay, requestApproval, approve, approveProposal, dropCoveredProposals, decline, decideGroupMessage, unsendGroupMessage, remove, testGroupMessage, undoSkip, restoreDeclined, addManual, move, cancel, arrivalChanged, stayOverlaps,
+    get, list, stageOf, describe, windowFor, cleaningInWindow, addPersonalStay, updatePersonalStay, removePersonalStay, requestApproval, approve, approveProposal, dropCoveredProposals, decline, decideGroupMessage, unsendGroupMessage, remove, testGroupMessage, undoSkip, restoreDeclined, addManual, move, cancel, arrivalChanged, stayOverlaps, missingApproved,
     customGroupMessage, confirmByCleaner, cleanerReply, saysYes, mentionedDates, datesIn, hooks, autoComplete, recordPaymentRequest, markPaid, unmarkPaid, markCleaned, logEvent, update,
   };
 }
